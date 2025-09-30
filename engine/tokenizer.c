@@ -26,7 +26,6 @@ static Token handle_less(Tokenizer *tokenizer);
 static Token handle_greater(Tokenizer *tokenizer);
 static Token handle_dot(Tokenizer *tokenizer);
 static Token handle_slash(Tokenizer *tokenizer);
-static Token handle_comment(Tokenizer *tokenizer);
 static Token handle_unknown(Tokenizer *tokenizer);
 
 typedef Token (*TokenHandler)(Tokenizer *);
@@ -60,7 +59,7 @@ static const TokenHandler token_handlers[256] = {
     ['>'] = handle_greater,
     ['?'] = handle_single_char,
     ['@'] = handle_single_char,
-    ['#'] = handle_comment,
+    ['#'] = handle_single_char,
     ['$'] = handle_single_char,
     ['~'] = handle_single_char,
     ['|'] = handle_single_char,
@@ -342,13 +341,6 @@ static Token handle_slash(Tokenizer *tokenizer) {
   }
 
   return make_token(TOKEN_SLASH, start, 1);
-}
-
-static Token handle_comment(Tokenizer *tokenizer) {
-  while (peek_char(tokenizer) != '\0' && peek_char(tokenizer) != '\n') {
-    next_char(tokenizer);
-  }
-  return tokenizer_next_token(tokenizer);
 }
 
 static Token handle_unknown(Tokenizer *tokenizer) {

@@ -14,12 +14,15 @@ typedef struct ForLoop ForLoop;
 typedef struct Occurrence Occurrence;
 typedef struct PaletteDefinition PaletteDefinition;
 typedef struct PaletteEntry PaletteEntry;
+typedef struct MacroCall MacroCall;
+typedef struct MacroArgument MacroArgument;
 
 // Expression types
 typedef enum {
   EXPR_NUMBER,
   EXPR_IDENTIFIER,
   EXPR_BINARY_OP,
+  EXPR_UNARY_OP,
   EXPR_COORDINATE,
   EXPR_FUNCTION_CALL,
 } ExpressionType;
@@ -38,6 +41,10 @@ typedef enum {
   OP_GREATER_EQUAL,
 } BinaryOperator;
 
+typedef enum {
+  OP_NEGATE,
+} UnaryOperator;
+
 typedef struct Expression {
   ExpressionType type;
   union {
@@ -48,6 +55,10 @@ typedef struct Expression {
       Expression *left;
       Expression *right;
     } binary;
+    struct {
+      UnaryOperator op;
+      Expression *operand;
+    } unary;
     struct {
       Expression *x;
       Expression *y;
@@ -107,6 +118,19 @@ typedef struct PaletteDefinition {
   int entry_count;
 } PaletteDefinition;
 
+// Macro argument: .name=value
+typedef struct MacroArgument {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  Expression *value;
+} MacroArgument;
+
+// Macro call: #macro_name .arg1=val1 .arg2=val2
+typedef struct MacroCall {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  MacroArgument *arguments;
+  int argument_count;
+} MacroCall;
+
 // Instruction types
 typedef enum {
   INSTR_BLOCK_PLACEMENT,
@@ -114,6 +138,7 @@ typedef enum {
   INSTR_FOR_LOOP,
   INSTR_OCCURRENCE,
   INSTR_PALETTE_DEFINITION,
+  INSTR_MACRO_CALL,
 } InstructionType;
 
 typedef struct Instruction {
@@ -124,6 +149,7 @@ typedef struct Instruction {
     ForLoop for_loop;
     Occurrence occurrence;
     PaletteDefinition palette_definition;
+    MacroCall macro_call;
   };
 } Instruction;
 
@@ -151,6 +177,39 @@ typedef struct {
   int data_size;            // Number of uint64_t elements in data array
 } Section;
 
+// Variable context for tracking values during execution
+typedef struct Variable {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  double value;
+} Variable;
+
+typedef struct VariableContext {
+  Variable *variables;
+  int variable_count;
+  int variable_capacity;
+} VariableContext;
+
+// Macro generator function type
+// Takes: variable context, macro arguments, argument count, section info, block_indices, palette info
+// Modifies block_indices array to place blocks
+typedef void (*MacroGenerator)(VariableContext *ctx, MacroArgument *args, int arg_count,
+                               int base_x, int base_y, int base_z,
+                               int *block_indices, char ***palette, 
+                               int *palette_size, int *palette_capacity);
+
+// Macro registry entry
+typedef struct {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  MacroGenerator generator;
+} MacroRegistryEntry;
+
+// Macro registry
+typedef struct {
+  MacroRegistryEntry *entries;
+  int entry_count;
+  int entry_capacity;
+} MacroRegistry;
+
 // Parser API
 void parser_init(Parser *parser, const char *input);
 Program *parse_program(Parser *parser);
@@ -164,3 +223,18 @@ void section_free(Section *section);
 void parser_error(Parser *parser, const char *message);
 void expression_free(Expression *expr);
 void instruction_free(Instruction *instr);
+
+// Macro registry API
+void macro_registry_init(MacroRegistry *registry);
+void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator);
+MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name);
+void macro_registry_free(MacroRegistry *registry);
+
+// Variable context API
+void context_init(VariableContext *ctx);
+void context_free(VariableContext *ctx);
+void context_set(VariableContext *ctx, const char *name, double value);
+double context_get(VariableContext *ctx, const char *name);
+
+// Helper function to get macro argument by name
+Expression *macro_get_arg(MacroArgument *args, int arg_count, const char *name);

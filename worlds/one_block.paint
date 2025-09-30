@@ -1,1 +1,2 @@
 [0 36 0] minecraft:grass_block
+#sphere .x=5 .y=25 .radius=5 .block=stone

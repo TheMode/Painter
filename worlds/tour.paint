@@ -25,6 +25,10 @@ for i in 0..5 {
   [i 1] stone
 }
 
+// Macros
+// Each macros (or functions) can take varying numbers of arguments, where each is either a number, block or coordinate
+#sphere .x=5 .y=0 .radius=5 .block=stone
+
 // Occurrences: specify an occurrence rate, which can be based on a constant block range (e.g. every X block, every block, every section/column/chunk/region), a noise
 // A simple example would be placing a block at the center of every section, or more practically tree, ore and other structures
 // Coordinates inside occurrences are relative to the occurrence position

@@ -1,0 +1,13 @@
+// Test file demonstrating the sphere macro
+// Creates 3D spheres of different sizes
+
+// Sphere at ground level
+#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone
+
+// Smaller sphere nearby
+#sphere .x=20 .y=5 .z=8 .radius=3 .block=oak_planks
+
+// Sphere with variables
+radius = 7
+center_y = 15
+#sphere .x=8 .y=center_y .z=8 .radius=radius .block=dirt

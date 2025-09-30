@@ -18,6 +18,7 @@ static Occurrence parse_occurrence(Parser *parser);
 static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_name);
 static Occurrence parse_named_occurrence(Parser *parser, const char *name);
 static PaletteDefinition parse_palette_definition(Parser *parser);
+static MacroCall parse_macro_call(Parser *parser);
 
 // Parser initialization
 void parser_init(Parser *parser, const char *input) {
@@ -61,6 +62,33 @@ static bool expect(Parser *parser, TokenType type, const char *message) {
 
 // Expression parsing
 static Expression *parse_primary(Parser *parser) {
+  // Handle unary operators (minus and plus)
+  if (check(parser, TOKEN_MINUS) || check(parser, TOKEN_PLUS)) {
+    bool is_minus = check(parser, TOKEN_MINUS);
+    advance(parser); // consume the operator
+    
+    Expression *operand = parse_primary(parser);
+    if (!operand) {
+      return NULL;
+    }
+    
+    if (is_minus) {
+      Expression *unary = malloc(sizeof(Expression));
+      if (!unary) {
+        parser_error(parser, "Out of memory");
+        expression_free(operand);
+        return NULL;
+      }
+      unary->type = EXPR_UNARY_OP;
+      unary->unary.op = OP_NEGATE;
+      unary->unary.operand = operand;
+      return unary;
+    }
+    
+    // Plus is a no-op, just return the operand
+    return operand;
+  }
+  
   if (match(parser, TOKEN_AT)) {
     if (!check(parser, TOKEN_IDENTIFIER)) {
       parser_error(parser, "Expected identifier after '@'");
@@ -621,6 +649,70 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
   return palette;
 }
 
+static MacroCall parse_macro_call(Parser *parser) {
+  MacroCall macro = {0};
+  
+  // Consume '#'
+  advance(parser);
+  
+  // Parse macro name
+  if (!check(parser, TOKEN_IDENTIFIER)) {
+    parser_error(parser, "Expected macro name after '#'");
+    return macro;
+  }
+  
+  strncpy(macro.name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  macro.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  advance(parser);
+  
+  // Parse arguments (.name=value)
+  int capacity = 8;
+  macro.arguments = malloc(sizeof(MacroArgument) * capacity);
+  macro.argument_count = 0;
+  
+  if (!macro.arguments) {
+    parser_error(parser, "Out of memory");
+    return macro;
+  }
+  
+  while (check(parser, TOKEN_DOT)) {
+    advance(parser); // consume '.'
+    
+    if (!check(parser, TOKEN_IDENTIFIER)) {
+      parser_error(parser, "Expected argument name after '.'");
+      return macro;
+    }
+    
+    MacroArgument arg = {0};
+    strncpy(arg.name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    advance(parser);
+    
+    if (!expect(parser, TOKEN_EQUAL, "Expected '=' after argument name")) {
+      return macro;
+    }
+    
+    arg.value = parse_expression(parser);
+    if (!arg.value) {
+      return macro;
+    }
+    
+    if (macro.argument_count >= capacity) {
+      capacity *= 2;
+      MacroArgument *resized = realloc(macro.arguments, sizeof(MacroArgument) * capacity);
+      if (!resized) {
+        parser_error(parser, "Out of memory");
+        return macro;
+      }
+      macro.arguments = resized;
+    }
+    
+    macro.arguments[macro.argument_count++] = arg;
+  }
+  
+  return macro;
+}
+
 static Instruction *parse_instruction(Parser *parser) {
   if (check(parser, TOKEN_EOF)) return NULL;
 
@@ -657,6 +749,17 @@ static Instruction *parse_instruction(Parser *parser) {
   if (check(parser, TOKEN_AT)) {
     instr->type = INSTR_OCCURRENCE;
     instr->occurrence = parse_occurrence(parser);
+    if (parser->has_error) {
+      free(instr);
+      return NULL;
+    }
+    return instr;
+  }
+
+  // Macro call: #macro_name .arg1=value1 .arg2=value2
+  if (check(parser, TOKEN_HASH)) {
+    instr->type = INSTR_MACRO_CALL;
+    instr->macro_call = parse_macro_call(parser);
     if (parser->has_error) {
       free(instr);
       return NULL;
@@ -764,6 +867,9 @@ void expression_free(Expression *expr) {
       expression_free(expr->binary.left);
       expression_free(expr->binary.right);
       break;
+    case EXPR_UNARY_OP:
+      expression_free(expr->unary.operand);
+      break;
     case EXPR_COORDINATE:
       expression_free(expr->coordinate.x);
       expression_free(expr->coordinate.y);
@@ -814,6 +920,12 @@ void instruction_free(Instruction *instr) {
     case INSTR_PALETTE_DEFINITION:
       free(instr->palette_definition.entries);
       break;
+    case INSTR_MACRO_CALL:
+      for (int i = 0; i < instr->macro_call.argument_count; i++) {
+        expression_free(instr->macro_call.arguments[i].value);
+      }
+      free(instr->macro_call.arguments);
+      break;
   }
 
   free(instr);
@@ -827,6 +939,92 @@ void program_free(Program *program) {
   }
   free(program->instructions);
   free(program);
+}
+
+// Macro registry implementation
+void macro_registry_init(MacroRegistry *registry) {
+  registry->entry_capacity = 16;
+  registry->entry_count = 0;
+  registry->entries = malloc(sizeof(MacroRegistryEntry) * registry->entry_capacity);
+}
+
+void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator) {
+  if (registry->entry_count >= registry->entry_capacity) {
+    registry->entry_capacity *= 2;
+    registry->entries = realloc(registry->entries, sizeof(MacroRegistryEntry) * registry->entry_capacity);
+  }
+  
+  strncpy(registry->entries[registry->entry_count].name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  registry->entries[registry->entry_count].name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  registry->entries[registry->entry_count].generator = generator;
+  registry->entry_count++;
+}
+
+MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name) {
+  for (int i = 0; i < registry->entry_count; i++) {
+    if (strcmp(registry->entries[i].name, name) == 0) {
+      return registry->entries[i].generator;
+    }
+  }
+  return NULL;
+}
+
+void macro_registry_free(MacroRegistry *registry) {
+  free(registry->entries);
+  registry->entries = NULL;
+  registry->entry_count = 0;
+  registry->entry_capacity = 0;
+}
+
+// Variable context implementation (moving from static to exported)
+void context_init(VariableContext *ctx) {
+  ctx->variable_capacity = 16;
+  ctx->variable_count = 0;
+  ctx->variables = malloc(sizeof(Variable) * ctx->variable_capacity);
+}
+
+void context_free(VariableContext *ctx) {
+  free(ctx->variables);
+}
+
+void context_set(VariableContext *ctx, const char *name, double value) {
+  // Check if variable already exists
+  for (int i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0) {
+      ctx->variables[i].value = value;
+      return;
+    }
+  }
+  
+  // Add new variable
+  if (ctx->variable_count >= ctx->variable_capacity) {
+    ctx->variable_capacity *= 2;
+    ctx->variables = realloc(ctx->variables, sizeof(Variable) * ctx->variable_capacity);
+  }
+  
+  strncpy(ctx->variables[ctx->variable_count].name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  ctx->variables[ctx->variable_count].name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  ctx->variables[ctx->variable_count].value = value;
+  ctx->variable_count++;
+}
+
+double context_get(VariableContext *ctx, const char *name) {
+  for (int i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0) {
+      return ctx->variables[i].value;
+    }
+  }
+  return 0.0;
+}
+
+// Helper function to get macro argument by name
+Expression *macro_get_arg(MacroArgument *args, int arg_count, const char *name) {
+  for (int i = 0; i < arg_count; i++) {
+    if (strcmp(args[i].name, name) == 0) {
+      return args[i].value;
+    }
+  }
+  return NULL;
 }
 
 // Helper function to calculate bits per entry based on palette size
@@ -873,58 +1071,6 @@ static void create_block_string(char *buffer, size_t buffer_size, const char *bl
   }
 }
 
-// Variable context for tracking values during execution
-typedef struct {
-  char name[MAX_TOKEN_VALUE_LENGTH];
-  double value;
-} Variable;
-
-typedef struct {
-  Variable *variables;
-  int variable_count;
-  int variable_capacity;
-} VariableContext;
-
-static void context_init(VariableContext *ctx) {
-  ctx->variable_capacity = 16;
-  ctx->variable_count = 0;
-  ctx->variables = malloc(sizeof(Variable) * ctx->variable_capacity);
-}
-
-static void context_free(VariableContext *ctx) {
-  free(ctx->variables);
-}
-
-static void context_set(VariableContext *ctx, const char *name, double value) {
-  // Check if variable already exists
-  for (int i = 0; i < ctx->variable_count; i++) {
-    if (strcmp(ctx->variables[i].name, name) == 0) {
-      ctx->variables[i].value = value;
-      return;
-    }
-  }
-  
-  // Add new variable
-  if (ctx->variable_count >= ctx->variable_capacity) {
-    ctx->variable_capacity *= 2;
-    ctx->variables = realloc(ctx->variables, sizeof(Variable) * ctx->variable_capacity);
-  }
-  
-  strncpy(ctx->variables[ctx->variable_count].name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  ctx->variables[ctx->variable_count].name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  ctx->variables[ctx->variable_count].value = value;
-  ctx->variable_count++;
-}
-
-static double context_get(VariableContext *ctx, const char *name) {
-  for (int i = 0; i < ctx->variable_count; i++) {
-    if (strcmp(ctx->variables[i].name, name) == 0) {
-      return ctx->variables[i].value;
-    }
-  }
-  return 0.0;
-}
-
 // Helper function to evaluate an expression to a number
 static double evaluate_expression(Expression *expr, VariableContext *ctx) {
   if (!expr) return 0.0;
@@ -946,19 +1092,91 @@ static double evaluate_expression(Expression *expr, VariableContext *ctx) {
         default: return 0.0;
       }
     }
+    case EXPR_UNARY_OP: {
+      double operand = evaluate_expression(expr->unary.operand, ctx);
+      switch (expr->unary.op) {
+        case OP_NEGATE: return -operand;
+        default: return 0.0;
+      }
+    }
     default:
       return 0.0;
   }
 }
 
+// Built-in macro implementations
+
+// Sphere macro: #sphere .x=<x> .y=<y> .z=<z> .radius=<radius> .block=<block_name>
+// Generates a filled 3D sphere
+static void builtin_macro_sphere(VariableContext *ctx, MacroArgument *args, int arg_count,
+                                 int base_x, int base_y, int base_z,
+                                 int *block_indices, char ***palette, 
+                                 int *palette_size, int *palette_capacity) {
+  // Get arguments
+  Expression *x_expr = macro_get_arg(args, arg_count, "x");
+  Expression *y_expr = macro_get_arg(args, arg_count, "y");
+  Expression *z_expr = macro_get_arg(args, arg_count, "z");
+  Expression *radius_expr = macro_get_arg(args, arg_count, "radius");
+  Expression *block_expr = macro_get_arg(args, arg_count, "block");
+  
+  if (!x_expr || !radius_expr || !block_expr) {
+    return; // Missing required arguments
+  }
+  
+  int center_x = (int)evaluate_expression(x_expr, ctx);
+  int center_y = y_expr ? (int)evaluate_expression(y_expr, ctx) : 0;
+  int center_z = z_expr ? (int)evaluate_expression(z_expr, ctx) : 0;
+  int radius = (int)evaluate_expression(radius_expr, ctx);
+  
+  // Get block name (must be an identifier)
+  if (block_expr->type != EXPR_IDENTIFIER) {
+    return; // Block must be an identifier
+  }
+  
+  char block_string[MAX_TOKEN_VALUE_LENGTH];
+  create_block_string(block_string, sizeof(block_string), block_expr->identifier, "");
+  
+  // Generate filled 3D sphere using distance formula
+  for (int dy = -radius; dy <= radius; dy++) {
+    for (int dx = -radius; dx <= radius; dx++) {
+      for (int dz = -radius; dz <= radius; dz++) {
+        // Check if point is within sphere using 3D distance formula
+        if (dx * dx + dy * dy + dz * dz <= radius * radius) {
+          int x = center_x + dx;
+          int y = center_y + dy;
+          int z = center_z + dz;
+          
+          // Check if block is within this section
+          if (x >= base_x && x < base_x + 16 &&
+              y >= base_y && y < base_y + 16 &&
+              z >= base_z && z < base_z + 16) {
+            
+            // Calculate index in section
+            int local_x = x - base_x;
+            int local_y = y - base_y;
+            int local_z = z - base_z;
+            int index = local_y * 256 + local_z * 16 + local_x;
+            
+            // Get or create palette index for this block
+            int palette_index = get_palette_index(palette, palette_size, palette_capacity, block_string);
+            block_indices[index] = palette_index;
+          }
+        }
+      }
+    }
+  }
+}
+
 // Forward declaration for recursive processing
 static void process_instruction(Instruction *instr, VariableContext *ctx, 
+                                MacroRegistry *macro_registry,
                                 int base_x, int base_y, int base_z,
                                 int *block_indices, char ***palette, 
                                 int *palette_size, int *palette_capacity);
 
 // Process a single instruction and its effects on the section
 static void process_instruction(Instruction *instr, VariableContext *ctx,
+                                MacroRegistry *macro_registry,
                                 int base_x, int base_y, int base_z,
                                 int *block_indices, char ***palette,
                                 int *palette_size, int *palette_capacity) {
@@ -1025,9 +1243,23 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
         
         // Process all body instructions
         for (int j = 0; j < loop->body_count; j++) {
-          process_instruction(loop->body[j], ctx, base_x, base_y, base_z,
+          process_instruction(loop->body[j], ctx, macro_registry, base_x, base_y, base_z,
                             block_indices, palette, palette_size, palette_capacity);
         }
+      }
+      break;
+    }
+    
+    case INSTR_MACRO_CALL: {
+      MacroCall *macro_call = &instr->macro_call;
+      
+      // Look up the macro generator
+      MacroGenerator generator = macro_registry_lookup(macro_registry, macro_call->name);
+      if (generator) {
+        // Execute the macro
+        generator(ctx, macro_call->arguments, macro_call->argument_count,
+                 base_x, base_y, base_z, block_indices, palette, 
+                 palette_size, palette_capacity);
       }
       break;
     }
@@ -1070,15 +1302,22 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   VariableContext ctx;
   context_init(&ctx);
   
+  // Initialize and register built-in macros
+  MacroRegistry macro_registry;
+  macro_registry_init(&macro_registry);
+  macro_registry_register(&macro_registry, "sphere", builtin_macro_sphere);
+  
   // Process all instructions
   for (int i = 0; i < program->instruction_count; i++) {
-    process_instruction(program->instructions[i], &ctx, base_x, base_y, base_z,
+    process_instruction(program->instructions[i], &ctx, &macro_registry,
+                       base_x, base_y, base_z,
                        block_indices, &section->palette, 
                        &section->palette_size, &palette_capacity);
   }
   
-  // Clean up context
+  // Clean up
   context_free(&ctx);
+  macro_registry_free(&macro_registry);
   
   // Calculate bits per entry
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);
