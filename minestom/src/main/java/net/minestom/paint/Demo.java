@@ -21,20 +21,20 @@ public final class Demo {
 
         // Create the instance
         InstanceManager instanceManager = MinecraftServer.getInstanceManager();
-        InstanceContainer instanceContainer = instanceManager.createInstanceContainer();
-        instanceContainer.setChunkSupplier(LightingChunk::new);
+        InstanceContainer instance = instanceManager.createInstanceContainer();
+        instance.setChunkSupplier(LightingChunk::new);
 
         final String program = Files.readString(Path.of("worlds", "one_block.paint"));
         Generator generator = PaintGenerator.load(program);
         //Generator generator = unit -> unit.modifier().fillHeight(0, 40, Block.GRASS_BLOCK);
-        instanceContainer.setGenerator(generator);
-        instanceContainer.loadChunk(0, 0).join();
+        instance.setGenerator(generator);
+        instance.loadChunk(0, 0).join();
 
         // Add an event callback to specify the spawning instance (and the spawn position)
         GlobalEventHandler globalEventHandler = MinecraftServer.getGlobalEventHandler();
         globalEventHandler.addListener(AsyncPlayerConfigurationEvent.class, event -> {
             final Player player = event.getPlayer();
-            event.setSpawningInstance(instanceContainer);
+            event.setSpawningInstance(instance);
             player.setRespawnPoint(new Pos(0, 42, 0));
             player.setGameMode(GameMode.CREATIVE);
         });
