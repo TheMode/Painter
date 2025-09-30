@@ -24,7 +24,6 @@ static MacroCall parse_macro_call(Parser *parser);
 // Parser initialization
 void parser_init(Parser *parser, const char *input) {
   tokenizer_init(&parser->tokenizer, input);
-  parser->current_token = tokenizer_next_token(&parser->tokenizer);
   parser->has_error = false;
   parser->error_message[0] = '\0';
 }
@@ -36,42 +35,21 @@ void parser_error(Parser *parser, const char *message) {
   }
 }
 
-static void advance(Parser *parser) {
-  parser->current_token = tokenizer_next_token(&parser->tokenizer);
-}
-
-static bool check(Parser *parser, TokenType type) {
-  return parser->current_token.type == type;
-}
-
-static bool match(Parser *parser, TokenType type) {
-  if (check(parser, type)) {
-    advance(parser);
-    return true;
-  }
-  return false;
-}
-
-static bool expect(Parser *parser, TokenType type, const char *message) {
-  if (check(parser, type)) {
-    advance(parser);
-    return true;
-  }
-  parser_error(parser, message);
-  return false;
-}
+// Helper macros for cleaner code
+#define peek() tokenizer_peek_token(&parser->tokenizer)
+#define peek_type() peek().type
+#define consume(type) tokenizer_consume(&parser->tokenizer, type)
+#define consume_keyword(keyword) tokenizer_consume_value(&parser->tokenizer, TOKEN_IDENTIFIER, keyword)
 
 // Expression parsing
 static Expression *parse_primary(Parser *parser) {
   // Handle unary operators (minus and plus)
-  if (check(parser, TOKEN_MINUS) || check(parser, TOKEN_PLUS)) {
-    bool is_minus = check(parser, TOKEN_MINUS);
-    advance(parser); // consume the operator
+  if (peek_type() == TOKEN_MINUS || peek_type() == TOKEN_PLUS) {
+    bool is_minus = peek_type() == TOKEN_MINUS;
+    consume(is_minus ? TOKEN_MINUS : TOKEN_PLUS);
     
     Expression *operand = parse_primary(parser);
-    if (!operand) {
-      return NULL;
-    }
+    if (!operand) return NULL;
     
     if (is_minus) {
       Expression *unary = malloc(sizeof(Expression));
@@ -85,50 +63,43 @@ static Expression *parse_primary(Parser *parser) {
       unary->unary.operand = operand;
       return unary;
     }
-    
-    // Plus is a no-op, just return the operand
-    return operand;
+    return operand; // Plus is a no-op
   }
   
-  if (match(parser, TOKEN_AT)) {
-    if (!check(parser, TOKEN_IDENTIFIER)) {
+  // Handle @function(...) syntax
+  if (consume(TOKEN_AT)) {
+    Token name_token = peek();
+    if (name_token.type != TOKEN_IDENTIFIER) {
       parser_error(parser, "Expected identifier after '@'");
       return NULL;
     }
-
-    char function_name[MAX_TOKEN_VALUE_LENGTH];
-    strncpy(function_name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-    function_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-    advance(parser);
-
-    if (!match(parser, TOKEN_LEFT_PAREN)) {
+    tokenizer_next_token(&parser->tokenizer);
+    if (!consume(TOKEN_LEFT_PAREN)) {
       parser_error(parser, "Expected '(' after function name");
       return NULL;
     }
-
-    return parse_function_call(parser, function_name);
+    return parse_function_call(parser, name_token.value);
   }
 
-  if (check(parser, TOKEN_NUMBER)) {
+  // Handle numbers
+  if (peek_type() == TOKEN_NUMBER) {
+    Token token = tokenizer_next_token(&parser->tokenizer);
     Expression *expr = malloc(sizeof(Expression));
     if (!expr) {
       parser_error(parser, "Out of memory");
       return NULL;
     }
     expr->type = EXPR_NUMBER;
-    expr->number = atof(parser->current_token.value);
-    advance(parser);
+    expr->number = atof(token.value);
     return expr;
   }
 
-  if (check(parser, TOKEN_IDENTIFIER)) {
-    char identifier[MAX_TOKEN_VALUE_LENGTH];
-    strncpy(identifier, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-    identifier[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-    advance(parser);
-
-    if (match(parser, TOKEN_LEFT_PAREN)) {
-      return parse_function_call(parser, identifier);
+  // Handle identifiers and function calls
+  if (peek_type() == TOKEN_IDENTIFIER) {
+    Token token = tokenizer_next_token(&parser->tokenizer);
+    
+    if (consume(TOKEN_LEFT_PAREN)) {
+      return parse_function_call(parser, token.value);
     }
 
     Expression *expr = malloc(sizeof(Expression));
@@ -137,18 +108,25 @@ static Expression *parse_primary(Parser *parser) {
       return NULL;
     }
     expr->type = EXPR_IDENTIFIER;
-    strncpy(expr->identifier, identifier, MAX_TOKEN_VALUE_LENGTH - 1);
+    strncpy(expr->identifier, token.value, MAX_TOKEN_VALUE_LENGTH - 1);
     expr->identifier[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     return expr;
   }
 
-  if (match(parser, TOKEN_LEFT_BRACKET)) {
+  // Handle coordinate [x y z]
+  if (consume(TOKEN_LEFT_BRACKET)) {
     return parse_coordinate(parser);
   }
 
-  if (match(parser, TOKEN_LEFT_PAREN)) {
+  // Handle parenthesized expressions
+  if (consume(TOKEN_LEFT_PAREN)) {
     Expression *inner = parse_expression(parser);
-    expect(parser, TOKEN_RIGHT_PAREN, "Expected ')' after expression");
+    if (!inner) return NULL;
+    if (!consume(TOKEN_RIGHT_PAREN)) {
+      parser_error(parser, "Expected ')' after expression");
+      expression_free(inner);
+      return NULL;
+    }
     return inner;
   }
 
@@ -160,11 +138,11 @@ static Expression *parse_multiplicative(Parser *parser) {
   Expression *left = parse_primary(parser);
   if (!left) return NULL;
 
-  while (check(parser, TOKEN_STAR) || check(parser, TOKEN_SLASH) || check(parser, TOKEN_MODULO)) {
+  while (peek_type() == TOKEN_STAR || peek_type() == TOKEN_SLASH || peek_type() == TOKEN_MODULO) {
     BinaryOperator op;
-    if (match(parser, TOKEN_STAR)) op = OP_MULTIPLY;
-    else if (match(parser, TOKEN_SLASH)) op = OP_DIVIDE;
-    else if (match(parser, TOKEN_MODULO)) op = OP_MODULO;
+    if (consume(TOKEN_STAR)) op = OP_MULTIPLY;
+    else if (consume(TOKEN_SLASH)) op = OP_DIVIDE;
+    else if (consume(TOKEN_MODULO)) op = OP_MODULO;
     else break;
 
     Expression *right = parse_primary(parser);
@@ -188,9 +166,9 @@ static Expression *parse_additive(Parser *parser) {
   Expression *left = parse_multiplicative(parser);
   if (!left) return NULL;
 
-  while (check(parser, TOKEN_PLUS) || check(parser, TOKEN_MINUS)) {
-    BinaryOperator op = match(parser, TOKEN_PLUS) ? OP_ADD : OP_SUBTRACT;
-    if (op != OP_ADD) advance(parser); // consume MINUS
+  while (peek_type() == TOKEN_PLUS || peek_type() == TOKEN_MINUS) {
+    BinaryOperator op = consume(TOKEN_PLUS) ? OP_ADD : OP_SUBTRACT;
+    if (op != OP_ADD) consume(TOKEN_MINUS);
 
     Expression *right = parse_multiplicative(parser);
     if (!right) {
@@ -213,17 +191,18 @@ static Expression *parse_comparison(Parser *parser) {
   Expression *left = parse_additive(parser);
   if (!left) return NULL;
 
-  if (check(parser, TOKEN_EQUAL_EQUAL) || check(parser, TOKEN_NOT_EQUAL) ||
-      check(parser, TOKEN_LEFT_ANGLE) || check(parser, TOKEN_LESS_EQUAL) ||
-      check(parser, TOKEN_RIGHT_ANGLE) || check(parser, TOKEN_GREATER_EQUAL)) {
+  TokenType type = peek_type();
+  if (type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL ||
+      type == TOKEN_LEFT_ANGLE || type == TOKEN_LESS_EQUAL ||
+      type == TOKEN_RIGHT_ANGLE || type == TOKEN_GREATER_EQUAL) {
     
     BinaryOperator op;
-    if (match(parser, TOKEN_EQUAL_EQUAL)) op = OP_EQUAL;
-    else if (match(parser, TOKEN_NOT_EQUAL)) op = OP_NOT_EQUAL;
-    else if (match(parser, TOKEN_LEFT_ANGLE)) op = OP_LESS;
-    else if (match(parser, TOKEN_LESS_EQUAL)) op = OP_LESS_EQUAL;
-    else if (match(parser, TOKEN_RIGHT_ANGLE)) op = OP_GREATER;
-    else if (match(parser, TOKEN_GREATER_EQUAL)) op = OP_GREATER_EQUAL;
+    if (consume(TOKEN_EQUAL_EQUAL)) op = OP_EQUAL;
+    else if (consume(TOKEN_NOT_EQUAL)) op = OP_NOT_EQUAL;
+    else if (consume(TOKEN_LEFT_ANGLE)) op = OP_LESS;
+    else if (consume(TOKEN_LESS_EQUAL)) op = OP_LESS_EQUAL;
+    else if (consume(TOKEN_RIGHT_ANGLE)) op = OP_GREATER;
+    else if (consume(TOKEN_GREATER_EQUAL)) op = OP_GREATER_EQUAL;
     else return left;
 
     Expression *right = parse_additive(parser);
@@ -260,12 +239,12 @@ static Expression *parse_coordinate(Parser *parser) {
   }
 
   // Handle optional comma after first expression (allow both "[x z]" and "[x, z]")
-  match(parser, TOKEN_COMMA);
+  consume(TOKEN_COMMA);
 
   coord->coordinate.y = NULL;
   coord->coordinate.z = NULL;
 
-  if (!check(parser, TOKEN_RIGHT_BRACKET)) {
+  if (peek_type() != TOKEN_RIGHT_BRACKET) {
     // Parse second value (could be y or z depending on whether there's a third)
     Expression *second = parse_expression(parser);
     if (!second) {
@@ -275,9 +254,9 @@ static Expression *parse_coordinate(Parser *parser) {
     }
 
     // Optional comma between second and third values
-    match(parser, TOKEN_COMMA);
+    consume(TOKEN_COMMA);
 
-    if (!check(parser, TOKEN_RIGHT_BRACKET)) {
+    if (peek_type() != TOKEN_RIGHT_BRACKET) {
       // Three values provided: [x y z]
       coord->coordinate.y = second;
       coord->coordinate.z = parse_expression(parser);
@@ -293,7 +272,8 @@ static Expression *parse_coordinate(Parser *parser) {
     }
   }
 
-  if (!expect(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after coordinate")) {
+  if (!consume(TOKEN_RIGHT_BRACKET)) {
+    parser_error(parser, "Expected ']' after coordinate");
     expression_free(coord->coordinate.x);
     if (coord->coordinate.y) expression_free(coord->coordinate.y);
     expression_free(coord->coordinate.z);
@@ -318,7 +298,7 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
   expr->function_call.args = NULL;
 
   int capacity = 0;
-  if (!check(parser, TOKEN_RIGHT_PAREN) && !check(parser, TOKEN_EOF)) {
+  if (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
     capacity = 4;
     expr->function_call.args = malloc(sizeof(Expression *) * capacity);
     if (!expr->function_call.args) {
@@ -347,26 +327,27 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
 
       expr->function_call.args[expr->function_call.arg_count++] = arg;
 
-      if (!match(parser, TOKEN_COMMA)) {
+      if (!consume(TOKEN_COMMA)) {
         break;
       }
     }
   }
 
-  if (!expect(parser, TOKEN_RIGHT_PAREN, "Expected ')' after function arguments")) {
+  if (!consume(TOKEN_RIGHT_PAREN)) {
+    parser_error(parser, "Expected ')' after function arguments");
     expression_free(expr);
     return NULL;
   }
 
   return expr;
 }
-
 // Instruction parsing
 static BlockPlacement parse_block_placement(Parser *parser) {
   BlockPlacement placement = {0};
   
   // Consume the opening [
-  if (!expect(parser, TOKEN_LEFT_BRACKET, "Expected '[' for coordinate")) {
+  if (!consume(TOKEN_LEFT_BRACKET)) {
+    parser_error(parser, "Expected '[' for coordinate");
     return placement;
   }
   
@@ -374,18 +355,20 @@ static BlockPlacement parse_block_placement(Parser *parser) {
   if (!placement.coordinate) return placement;
 
   // Parse block name (optionally with namespace, e.g., "minecraft:grass_block")
-  if (!check(parser, TOKEN_IDENTIFIER)) {
+  Token name_token = peek();
+  if (name_token.type != TOKEN_IDENTIFIER) {
     parser_error(parser, "Expected block name");
     return placement;
   }
 
-  strncpy(placement.block_name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  strncpy(placement.block_name, name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
   placement.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  advance(parser);
+  tokenizer_next_token(&parser->tokenizer);
 
   // Check for namespace separator (:)
-  if (match(parser, TOKEN_COLON)) {
-    if (!check(parser, TOKEN_IDENTIFIER)) {
+  if (consume(TOKEN_COLON)) {
+    Token ns_token = peek();
+    if (ns_token.type != TOKEN_IDENTIFIER) {
       parser_error(parser, "Expected block name after ':'");
       return placement;
     }
@@ -394,32 +377,33 @@ static BlockPlacement parse_block_placement(Parser *parser) {
     if (current_len < MAX_TOKEN_VALUE_LENGTH - 1) {
       placement.block_name[current_len] = ':';
       strncpy(placement.block_name + current_len + 1, 
-              parser->current_token.value, 
+              ns_token.value, 
               MAX_TOKEN_VALUE_LENGTH - current_len - 2);
       placement.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     }
-    advance(parser);
+    tokenizer_next_token(&parser->tokenizer);
   }
 
   // Parse optional block properties [key=value,...]
   placement.block_properties[0] = '\0';
-  if (check(parser, TOKEN_LEFT_BRACKET)) {
-    Token peek = tokenizer_peek_token(&parser->tokenizer);
-    if (peek.type == TOKEN_IDENTIFIER || peek.type == TOKEN_RIGHT_BRACKET) {
-      advance(parser); // consume '['
+  if (peek_type() == TOKEN_LEFT_BRACKET) {
+    Token next = tokenizer_peek_next_token(&parser->tokenizer);
+    if (next.type == TOKEN_IDENTIFIER || next.type == TOKEN_RIGHT_BRACKET) {
+      tokenizer_next_token(&parser->tokenizer); // consume '['
 
       size_t offset = 0;
-      while (!check(parser, TOKEN_RIGHT_BRACKET) && !check(parser, TOKEN_EOF)) {
-        const char *token_str = parser->current_token.value;
-        size_t token_len = strlen(token_str);
+      while (peek_type() != TOKEN_RIGHT_BRACKET && peek_type() != TOKEN_EOF) {
+        Token prop_token = tokenizer_next_token(&parser->tokenizer);
+        size_t token_len = strlen(prop_token.value);
 
         if (offset + token_len < MAX_TOKEN_VALUE_LENGTH - 1) {
-          strcpy(placement.block_properties + offset, token_str);
+          strcpy(placement.block_properties + offset, prop_token.value);
           offset += token_len;
         }
-        advance(parser);
       }
-      expect(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after block properties");
+      if (!consume(TOKEN_RIGHT_BRACKET)) {
+        parser_error(parser, "Expected ']' after block properties");
+      }
     }
   }
 
@@ -429,28 +413,31 @@ static BlockPlacement parse_block_placement(Parser *parser) {
 static ForLoop parse_for_loop(Parser *parser) {
   ForLoop loop = {0};
   
-  advance(parser); // consume 'for'
+  // 'for' keyword is already consumed by caller
   
-  if (!check(parser, TOKEN_IDENTIFIER)) {
+  Token var_token = peek();
+  if (var_token.type != TOKEN_IDENTIFIER) {
     parser_error(parser, "Expected loop variable name");
     return loop;
   }
 
-  strncpy(loop.variable, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  strncpy(loop.variable, var_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
   loop.variable[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  advance(parser);
+  tokenizer_next_token(&parser->tokenizer);
 
-  if (parser->current_token.type != TOKEN_IDENTIFIER ||
-      strcmp(parser->current_token.value, "in") != 0) {
+  if (!consume_keyword("in")) {
     parser_error(parser, "Expected 'in' after loop variable");
     return loop;
   }
-  advance(parser); // consume 'in'
 
   loop.start = parse_expression(parser);
   if (!loop.start) return loop;
 
-  expect(parser, TOKEN_DOT_DOT, "Expected '..' in range");
+  if (!consume(TOKEN_DOT_DOT)) {
+    parser_error(parser, "Expected '..' in range");
+    expression_free(loop.start);
+    return loop;
+  }
 
   loop.end = parse_expression(parser);
   if (!loop.end) {
@@ -458,14 +445,19 @@ static ForLoop parse_for_loop(Parser *parser) {
     return loop;
   }
 
-  expect(parser, TOKEN_LEFT_BRACE, "Expected '{' after for loop header");
+  if (!consume(TOKEN_LEFT_BRACE)) {
+    parser_error(parser, "Expected '{' after for loop header");
+    expression_free(loop.start);
+    expression_free(loop.end);
+    return loop;
+  }
 
   // Parse body instructions
   int capacity = 8;
   loop.body = malloc(sizeof(Instruction *) * capacity);
   loop.body_count = 0;
 
-  while (!check(parser, TOKEN_RIGHT_BRACE) && !check(parser, TOKEN_EOF)) {
+  while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
     Instruction *instr = parse_instruction(parser);
     if (instr) {
       if (loop.body_count >= capacity) {
@@ -476,7 +468,9 @@ static ForLoop parse_for_loop(Parser *parser) {
     }
   }
 
-  expect(parser, TOKEN_RIGHT_BRACE, "Expected '}' after for loop body");
+  if (!consume(TOKEN_RIGHT_BRACE)) {
+    parser_error(parser, "Expected '}' after for loop body");
+  }
 
   return loop;
 }
@@ -484,17 +478,18 @@ static ForLoop parse_for_loop(Parser *parser) {
 static Occurrence parse_occurrence(Parser *parser) {
   Occurrence occurrence = {0};
 
-  advance(parser); // consume '@'
+  tokenizer_next_token(&parser->tokenizer); // consume '@'
 
-  if (!check(parser, TOKEN_IDENTIFIER)) {
+  Token type_token = peek();
+  if (type_token.type != TOKEN_IDENTIFIER) {
     parser_error(parser, "Expected occurrence type");
     return occurrence;
   }
 
   char type_name[MAX_TOKEN_VALUE_LENGTH];
-  strncpy(type_name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  strncpy(type_name, type_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
   type_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  advance(parser);
+  tokenizer_next_token(&parser->tokenizer);
 
   return parse_occurrence_from_type(parser, type_name);
 }
@@ -512,7 +507,7 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
   occurrence.args = NULL;
   occurrence.arg_count = 0;
 
-  if (match(parser, TOKEN_LEFT_PAREN)) {
+  if (consume(TOKEN_LEFT_PAREN)) {
     int capacity = 4;
     occurrence.args = malloc(sizeof(Expression *) * capacity);
     if (!occurrence.args) {
@@ -520,7 +515,7 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
       return occurrence;
     }
 
-    while (!check(parser, TOKEN_RIGHT_PAREN) && !check(parser, TOKEN_EOF)) {
+    while (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
       Expression *arg = parse_expression(parser);
       if (!arg) {
         return occurrence;
@@ -538,22 +533,29 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
 
       occurrence.args[occurrence.arg_count++] = arg;
 
-      if (!match(parser, TOKEN_COMMA)) {
+      if (!consume(TOKEN_COMMA)) {
         break;
       }
     }
 
-    expect(parser, TOKEN_RIGHT_PAREN, "Expected ')' after occurrence arguments");
+    if (!consume(TOKEN_RIGHT_PAREN)) {
+      parser_error(parser, "Expected ')' after occurrence arguments");
+      return occurrence;
+    }
   }
 
   occurrence.condition = NULL;
-  if (check(parser, TOKEN_RIGHT_ANGLE) || check(parser, TOKEN_LEFT_ANGLE) ||
-      check(parser, TOKEN_EQUAL_EQUAL) || check(parser, TOKEN_NOT_EQUAL) ||
-      check(parser, TOKEN_GREATER_EQUAL) || check(parser, TOKEN_LESS_EQUAL)) {
+  TokenType type = peek_type();
+  if (type == TOKEN_RIGHT_ANGLE || type == TOKEN_LEFT_ANGLE ||
+      type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL ||
+      type == TOKEN_GREATER_EQUAL || type == TOKEN_LESS_EQUAL) {
     occurrence.condition = parse_expression(parser);
   }
 
-  expect(parser, TOKEN_LEFT_BRACE, "Expected '{' after occurrence header");
+  if (!consume(TOKEN_LEFT_BRACE)) {
+    parser_error(parser, "Expected '{' after occurrence header");
+    return occurrence;
+  }
 
   int body_capacity = 8;
   occurrence.body = malloc(sizeof(Instruction *) * body_capacity);
@@ -564,7 +566,7 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
     return occurrence;
   }
 
-  while (!check(parser, TOKEN_RIGHT_BRACE) && !check(parser, TOKEN_EOF)) {
+  while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
     Instruction *instr = parse_instruction(parser);
     if (instr) {
     if (occurrence.body_count >= body_capacity) {
@@ -580,7 +582,9 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
     }
   }
 
-  expect(parser, TOKEN_RIGHT_BRACE, "Expected '}' after occurrence body");
+  if (!consume(TOKEN_RIGHT_BRACE)) {
+    parser_error(parser, "Expected '}' after occurrence body");
+  }
 
   return occurrence;
 }
@@ -589,50 +593,59 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
   PaletteDefinition palette = {0};
   
   // Name is already parsed in assignment
-  expect(parser, TOKEN_LEFT_BRACE, "Expected '{' for palette definition");
+  if (!consume(TOKEN_LEFT_BRACE)) {
+    parser_error(parser, "Expected '{' for palette definition");
+    return palette;
+  }
 
   int capacity = 16;
   palette.entries = malloc(sizeof(PaletteEntry) * capacity);
   palette.entry_count = 0;
 
-  while (!check(parser, TOKEN_RIGHT_BRACE) && !check(parser, TOKEN_EOF)) {
+  while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
     // Parse key
-    if (!check(parser, TOKEN_NUMBER)) {
+    Token key_token = peek();
+    if (key_token.type != TOKEN_NUMBER) {
       parser_error(parser, "Expected number for palette key");
       break;
     }
 
     PaletteEntry entry = {0};
-    entry.key = atoi(parser->current_token.value);
-    advance(parser);
+    entry.key = atoi(key_token.value);
+    tokenizer_next_token(&parser->tokenizer);
 
-    expect(parser, TOKEN_COLON, "Expected ':' after palette key");
+    if (!consume(TOKEN_COLON)) {
+      parser_error(parser, "Expected ':' after palette key");
+      break;
+    }
 
     // Parse block name
-    if (!check(parser, TOKEN_IDENTIFIER)) {
+    Token block_token = peek();
+    if (block_token.type != TOKEN_IDENTIFIER) {
       parser_error(parser, "Expected block name");
       break;
     }
 
-    strncpy(entry.block_name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    strncpy(entry.block_name, block_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
     entry.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-    advance(parser);
+    tokenizer_next_token(&parser->tokenizer);
 
     // Parse optional properties
     entry.block_properties[0] = '\0';
-    if (match(parser, TOKEN_LEFT_BRACKET)) {
+    if (consume(TOKEN_LEFT_BRACKET)) {
       size_t offset = 0;
-      while (!check(parser, TOKEN_RIGHT_BRACKET) && !check(parser, TOKEN_EOF)) {
-        const char *token_str = parser->current_token.value;
-        size_t token_len = strlen(token_str);
+      while (peek_type() != TOKEN_RIGHT_BRACKET && peek_type() != TOKEN_EOF) {
+        Token prop_token = tokenizer_next_token(&parser->tokenizer);
+        size_t token_len = strlen(prop_token.value);
         
         if (offset + token_len < MAX_TOKEN_VALUE_LENGTH - 1) {
-          strcpy(entry.block_properties + offset, token_str);
+          strcpy(entry.block_properties + offset, prop_token.value);
           offset += token_len;
         }
-        advance(parser);
       }
-      expect(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after block properties");
+      if (!consume(TOKEN_RIGHT_BRACKET)) {
+        parser_error(parser, "Expected ']' after block properties");
+      }
     }
 
     if (palette.entry_count >= capacity) {
@@ -642,29 +655,31 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
     palette.entries[palette.entry_count++] = entry;
 
     // Optional comma or newline
-    match(parser, TOKEN_COMMA);
+    consume(TOKEN_COMMA);
   }
 
-  expect(parser, TOKEN_RIGHT_BRACE, "Expected '}' after palette definition");
+  if (!consume(TOKEN_RIGHT_BRACE)) {
+    parser_error(parser, "Expected '}' after palette definition");
+  }
 
   return palette;
 }
-
 static MacroCall parse_macro_call(Parser *parser) {
   MacroCall macro = {0};
   
   // Consume '#'
-  advance(parser);
+  tokenizer_next_token(&parser->tokenizer);
   
   // Parse macro name
-  if (!check(parser, TOKEN_IDENTIFIER)) {
+  Token name_token = peek();
+  if (name_token.type != TOKEN_IDENTIFIER) {
     parser_error(parser, "Expected macro name after '#'");
     return macro;
   }
   
-  strncpy(macro.name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  strncpy(macro.name, name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
   macro.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  advance(parser);
+  tokenizer_next_token(&parser->tokenizer);
   
   // Parse arguments (.name=value)
   int capacity = 8;
@@ -676,20 +691,20 @@ static MacroCall parse_macro_call(Parser *parser) {
     return macro;
   }
   
-  while (check(parser, TOKEN_DOT)) {
-    advance(parser); // consume '.'
-    
-    if (!check(parser, TOKEN_IDENTIFIER)) {
+  while (consume(TOKEN_DOT)) {
+    Token arg_name_token = peek();
+    if (arg_name_token.type != TOKEN_IDENTIFIER) {
       parser_error(parser, "Expected argument name after '.'");
       return macro;
     }
     
     MacroArgument arg = {0};
-    strncpy(arg.name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
     arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-    advance(parser);
+    tokenizer_next_token(&parser->tokenizer);
     
-    if (!expect(parser, TOKEN_EQUAL, "Expected '=' after argument name")) {
+    if (!consume(TOKEN_EQUAL)) {
+      parser_error(parser, "Expected '=' after argument name");
       return macro;
     }
     
@@ -715,7 +730,7 @@ static MacroCall parse_macro_call(Parser *parser) {
 }
 
 static Instruction *parse_instruction(Parser *parser) {
-  if (check(parser, TOKEN_EOF)) return NULL;
+  if (peek_type() == TOKEN_EOF) return NULL;
 
   Instruction *instr = malloc(sizeof(Instruction));
   if (!instr) {
@@ -724,7 +739,7 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   // Block placement: [x y z] block_name
-  if (check(parser, TOKEN_LEFT_BRACKET)) {
+  if (peek_type() == TOKEN_LEFT_BRACKET) {
     instr->type = INSTR_BLOCK_PLACEMENT;
     instr->block_placement = parse_block_placement(parser);
     if (parser->has_error) {
@@ -735,8 +750,7 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   // For loop: for var in start..end { ... }
-  if (check(parser, TOKEN_IDENTIFIER) && 
-      strcmp(parser->current_token.value, "for") == 0) {
+  if (consume_keyword("for")) {
     instr->type = INSTR_FOR_LOOP;
     instr->for_loop = parse_for_loop(parser);
     if (parser->has_error) {
@@ -747,7 +761,7 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   // Occurrence: @type(...) { ... } or variable = @type(...)
-  if (check(parser, TOKEN_AT)) {
+  if (peek_type() == TOKEN_AT) {
     instr->type = INSTR_OCCURRENCE;
     instr->occurrence = parse_occurrence(parser);
     if (parser->has_error) {
@@ -758,7 +772,7 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   // Macro call: #macro_name .arg1=value1 .arg2=value2
-  if (check(parser, TOKEN_HASH)) {
+  if (peek_type() == TOKEN_HASH) {
     instr->type = INSTR_MACRO_CALL;
     instr->macro_call = parse_macro_call(parser);
     if (parser->has_error) {
@@ -769,18 +783,15 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   // Assignment or palette definition: name = value or name = { ... }
-  if (check(parser, TOKEN_IDENTIFIER)) {
+  if (peek_type() == TOKEN_IDENTIFIER) {
+    Token name_token = tokenizer_next_token(&parser->tokenizer);
     char name[MAX_TOKEN_VALUE_LENGTH];
-    strncpy(name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    strncpy(name, name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
     name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
 
-    Token next = tokenizer_peek_token(&parser->tokenizer);
-    if (next.type == TOKEN_EQUAL) {
-      advance(parser); // consume identifier
-      advance(parser); // consume '='
-
+    if (consume(TOKEN_EQUAL)) {
       // Check if this is a palette definition or occurrence assignment
-      if (check(parser, TOKEN_LEFT_BRACE)) {
+      if (peek_type() == TOKEN_LEFT_BRACE) {
         instr->type = INSTR_PALETTE_DEFINITION;
         strncpy(instr->palette_definition.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
         instr->palette_definition.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
@@ -791,7 +802,7 @@ static Instruction *parse_instruction(Parser *parser) {
           return NULL;
         }
         return instr;
-      } else if (check(parser, TOKEN_AT)) {
+      } else if (peek_type() == TOKEN_AT) {
         instr->type = INSTR_OCCURRENCE;
         instr->occurrence = parse_occurrence(parser);
         if (parser->has_error) {
@@ -810,8 +821,7 @@ static Instruction *parse_instruction(Parser *parser) {
         }
         return instr;
       }
-    } else if (next.type == TOKEN_LEFT_BRACE) {
-      advance(parser); // consume identifier
+    } else if (peek_type() == TOKEN_LEFT_BRACE) {
       instr->type = INSTR_OCCURRENCE;
       instr->occurrence = parse_named_occurrence(parser, name);
       if (parser->has_error) {
@@ -838,7 +848,7 @@ Program *parse_program(Parser *parser) {
   program->instruction_count = 0;
   program->instructions = malloc(sizeof(Instruction *) * program->instruction_capacity);
 
-  while (!check(parser, TOKEN_EOF) && !parser->has_error) {
+  while (peek_type() != TOKEN_EOF && !parser->has_error) {
     Instruction *instr = parse_instruction(parser);
     if (instr) {
       if (program->instruction_count >= program->instruction_capacity) {

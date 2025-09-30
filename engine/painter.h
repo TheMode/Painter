@@ -156,7 +156,6 @@ typedef struct Instruction {
 // Parser context
 typedef struct {
   Tokenizer tokenizer;
-  Token current_token;
   bool has_error;
   char error_message[256];
 } Parser;
