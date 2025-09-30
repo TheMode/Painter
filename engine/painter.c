@@ -873,16 +873,70 @@ static void create_block_string(char *buffer, size_t buffer_size, const char *bl
   }
 }
 
+// Variable context for tracking values during execution
+typedef struct {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  double value;
+} Variable;
+
+typedef struct {
+  Variable *variables;
+  int variable_count;
+  int variable_capacity;
+} VariableContext;
+
+static void context_init(VariableContext *ctx) {
+  ctx->variable_capacity = 16;
+  ctx->variable_count = 0;
+  ctx->variables = malloc(sizeof(Variable) * ctx->variable_capacity);
+}
+
+static void context_free(VariableContext *ctx) {
+  free(ctx->variables);
+}
+
+static void context_set(VariableContext *ctx, const char *name, double value) {
+  // Check if variable already exists
+  for (int i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0) {
+      ctx->variables[i].value = value;
+      return;
+    }
+  }
+  
+  // Add new variable
+  if (ctx->variable_count >= ctx->variable_capacity) {
+    ctx->variable_capacity *= 2;
+    ctx->variables = realloc(ctx->variables, sizeof(Variable) * ctx->variable_capacity);
+  }
+  
+  strncpy(ctx->variables[ctx->variable_count].name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  ctx->variables[ctx->variable_count].name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  ctx->variables[ctx->variable_count].value = value;
+  ctx->variable_count++;
+}
+
+static double context_get(VariableContext *ctx, const char *name) {
+  for (int i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0) {
+      return ctx->variables[i].value;
+    }
+  }
+  return 0.0;
+}
+
 // Helper function to evaluate an expression to a number
-static double evaluate_expression(Expression *expr) {
+static double evaluate_expression(Expression *expr, VariableContext *ctx) {
   if (!expr) return 0.0;
   
   switch (expr->type) {
     case EXPR_NUMBER:
       return expr->number;
+    case EXPR_IDENTIFIER:
+      return context_get(ctx, expr->identifier);
     case EXPR_BINARY_OP: {
-      double left = evaluate_expression(expr->binary.left);
-      double right = evaluate_expression(expr->binary.right);
+      double left = evaluate_expression(expr->binary.left, ctx);
+      double right = evaluate_expression(expr->binary.right, ctx);
       switch (expr->binary.op) {
         case OP_ADD: return left + right;
         case OP_SUBTRACT: return left - right;
@@ -894,6 +948,97 @@ static double evaluate_expression(Expression *expr) {
     }
     default:
       return 0.0;
+  }
+}
+
+// Forward declaration for recursive processing
+static void process_instruction(Instruction *instr, VariableContext *ctx, 
+                                int base_x, int base_y, int base_z,
+                                int *block_indices, char ***palette, 
+                                int *palette_size, int *palette_capacity);
+
+// Process a single instruction and its effects on the section
+static void process_instruction(Instruction *instr, VariableContext *ctx,
+                                int base_x, int base_y, int base_z,
+                                int *block_indices, char ***palette,
+                                int *palette_size, int *palette_capacity) {
+  if (!instr) return;
+  
+  switch (instr->type) {
+    case INSTR_BLOCK_PLACEMENT: {
+      BlockPlacement *placement = &instr->block_placement;
+      
+      if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
+        // Evaluate coordinates
+        int x = (int)evaluate_expression(placement->coordinate->coordinate.x, ctx);
+        int y = placement->coordinate->coordinate.y ? 
+                (int)evaluate_expression(placement->coordinate->coordinate.y, ctx) : 0;
+        int z = (int)evaluate_expression(placement->coordinate->coordinate.z, ctx);
+        
+        // Check if block is within this section
+        if (x >= base_x && x < base_x + 16 &&
+            y >= base_y && y < base_y + 16 &&
+            z >= base_z && z < base_z + 16) {
+          
+          // Convert to section-local coordinates
+          int local_x = x - base_x;
+          int local_y = y - base_y;
+          int local_z = z - base_z;
+          
+          // Calculate index in block array
+          // Standard Minecraft format: y*256 + z*16 + x (array[y][z][x])
+          int block_index = local_y * 256 + local_z * 16 + local_x;
+          
+          // Create full block string
+          char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
+          create_block_string(block_string, sizeof(block_string), 
+                            placement->block_name, placement->block_properties);
+          
+          // Get or add to palette
+          int palette_index = get_palette_index(palette, palette_size, 
+                                               palette_capacity, block_string);
+          
+          block_indices[block_index] = palette_index;
+        }
+      }
+      break;
+    }
+    
+    case INSTR_ASSIGNMENT: {
+      Assignment *assignment = &instr->assignment;
+      double value = evaluate_expression(assignment->value, ctx);
+      context_set(ctx, assignment->name, value);
+      break;
+    }
+    
+    case INSTR_FOR_LOOP: {
+      ForLoop *loop = &instr->for_loop;
+      
+      // Evaluate loop bounds
+      int start = (int)evaluate_expression(loop->start, ctx);
+      int end = (int)evaluate_expression(loop->end, ctx);
+      
+      // Execute loop body for each iteration
+      for (int i = start; i < end; i++) {
+        // Set loop variable
+        context_set(ctx, loop->variable, (double)i);
+        
+        // Process all body instructions
+        for (int j = 0; j < loop->body_count; j++) {
+          process_instruction(loop->body[j], ctx, base_x, base_y, base_z,
+                            block_indices, palette, palette_size, palette_capacity);
+        }
+      }
+      break;
+    }
+    
+    case INSTR_OCCURRENCE:
+      // TODO: Implement occurrence handling
+      break;
+    
+    case INSTR_PALETTE_DEFINITION:
+      // TODO: Implement palette definition handling
+      break;
   }
 }
 
@@ -921,48 +1066,19 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   int base_y = section_y * 16;
   int base_z = section_z * 16;
   
+  // Initialize variable context
+  VariableContext ctx;
+  context_init(&ctx);
+  
   // Process all instructions
   for (int i = 0; i < program->instruction_count; i++) {
-    Instruction *instr = program->instructions[i];
-    
-    if (instr->type == INSTR_BLOCK_PLACEMENT) {
-      BlockPlacement *placement = &instr->block_placement;
-      
-      if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
-        // Evaluate coordinates
-        int x = (int)evaluate_expression(placement->coordinate->coordinate.x);
-        int y = placement->coordinate->coordinate.y ? 
-                (int)evaluate_expression(placement->coordinate->coordinate.y) : 0;
-        int z = (int)evaluate_expression(placement->coordinate->coordinate.z);
-        
-        // Check if block is within this section
-        if (x >= base_x && x < base_x + 16 &&
-            y >= base_y && y < base_y + 16 &&
-            z >= base_z && z < base_z + 16) {
-          
-          // Convert to section-local coordinates
-          int local_x = x - base_x;
-          int local_y = y - base_y;
-          int local_z = z - base_z;
-          
-          // Calculate index in block array
-          // Standard Minecraft format: y*256 + z*16 + x (array[y][z][x])
-          int block_index = local_y * 256 + local_z * 16 + local_x;
-          // Create full block string
-          char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
-          create_block_string(block_string, sizeof(block_string), 
-                            placement->block_name, placement->block_properties);
-          
-          // Get or add to palette
-          int palette_index = get_palette_index(&section->palette, &section->palette_size, 
-                                               &palette_capacity, block_string);
-          
-          block_indices[block_index] = palette_index;
-        }
-      }
-    }
-    // TODO: Handle FOR_LOOP, OCCURRENCE, etc. for full implementation
+    process_instruction(program->instructions[i], &ctx, base_x, base_y, base_z,
+                       block_indices, &section->palette, 
+                       &section->palette_size, &palette_capacity);
   }
+  
+  // Clean up context
+  context_free(&ctx);
   
   // Calculate bits per entry
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);

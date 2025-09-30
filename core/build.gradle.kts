@@ -128,6 +128,17 @@ tasks.withType<JavaCompile> {
 tasks.withType<Test> {
     jvmArgs("--enable-preview")
     useJUnitPlatform()
+    
+    // Set working directory to project root so library path works
+    workingDir = rootProject.projectDir
+    
+    // Ensure test resources include the native library
+    dependsOn("compileNativeLib")
+    
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = false
+    }
 }
 
 tasks.withType<JavaExec> {
