@@ -17,6 +17,31 @@ typedef struct PaletteEntry PaletteEntry;
 typedef struct MacroCall MacroCall;
 typedef struct MacroArgument MacroArgument;
 
+// Generic pointer-backed containers used throughout the parser/executor
+typedef struct {
+  Expression **items;
+  size_t count;
+  size_t capacity;
+} ExpressionList;
+
+typedef struct {
+  Instruction **items;
+  size_t count;
+  size_t capacity;
+} InstructionList;
+
+typedef struct {
+  PaletteEntry *items;
+  size_t count;
+  size_t capacity;
+} PaletteEntryList;
+
+typedef struct {
+  MacroArgument *items;
+  size_t count;
+  size_t capacity;
+} MacroArgumentList;
+
 // Expression types
 typedef enum {
   EXPR_NUMBER,
@@ -66,8 +91,7 @@ typedef struct Expression {
     } coordinate;
     struct {
       char name[MAX_TOKEN_VALUE_LENGTH];
-      Expression **args;
-      int arg_count;
+      ExpressionList args;
     } function_call;
   };
 } Expression;
@@ -90,18 +114,15 @@ typedef struct ForLoop {
   char variable[MAX_TOKEN_VALUE_LENGTH];
   Expression *start;
   Expression *end;
-  Instruction **body;
-  int body_count;
+  InstructionList body;
 } ForLoop;
 
 // Occurrence: @type(args) [condition] { instructions }
 typedef struct Occurrence {
   char type[MAX_TOKEN_VALUE_LENGTH];
-  Expression **args;
-  int arg_count;
+  ExpressionList args;
   Expression *condition; // optional
-  Instruction **body;
-  int body_count;
+  InstructionList body;
 } Occurrence;
 
 // Palette entry: key: block_name[properties]
@@ -114,8 +135,7 @@ typedef struct PaletteEntry {
 // Palette definition: name = { entries }
 typedef struct PaletteDefinition {
   char name[MAX_TOKEN_VALUE_LENGTH];
-  PaletteEntry *entries;
-  int entry_count;
+  PaletteEntryList entries;
 } PaletteDefinition;
 
 // Macro argument: .name=value
@@ -127,8 +147,7 @@ typedef struct MacroArgument {
 // Macro call: #macro_name .arg1=val1 .arg2=val2
 typedef struct MacroCall {
   char name[MAX_TOKEN_VALUE_LENGTH];
-  MacroArgument *arguments;
-  int argument_count;
+  MacroArgumentList arguments;
 } MacroCall;
 
 // Instruction types
@@ -160,7 +179,7 @@ typedef struct {
   char error_message[256];
 } Parser;
 
-// Main program structure
+// Main program structure (layout is consumed by Panama bindings; keep fields stable)
 typedef struct {
   Instruction **instructions;
   int instruction_count;
@@ -184,14 +203,14 @@ typedef struct Variable {
 
 typedef struct VariableContext {
   Variable *variables;
-  int variable_count;
-  int variable_capacity;
+  size_t variable_count;
+  size_t variable_capacity;
 } VariableContext;
 
 // Macro generator function type
 // Takes: variable context, macro arguments, argument count, section info, block_indices, palette info
 // Modifies block_indices array to place blocks
-typedef void (*MacroGenerator)(VariableContext *ctx, MacroArgument *args, int arg_count,
+typedef void (*MacroGenerator)(VariableContext *ctx, const MacroArgumentList *args,
                                int base_x, int base_y, int base_z,
                                int *block_indices, char ***palette, 
                                int *palette_size, int *palette_capacity);
@@ -205,8 +224,8 @@ typedef struct {
 // Macro registry
 typedef struct {
   MacroRegistryEntry *entries;
-  int entry_count;
-  int entry_capacity;
+  size_t entry_count;
+  size_t entry_capacity;
 } MacroRegistry;
 
 // Parser API
@@ -236,4 +255,13 @@ void context_set(VariableContext *ctx, const char *name, double value);
 double context_get(VariableContext *ctx, const char *name);
 
 // Helper function to get macro argument by name
-Expression *macro_get_arg(MacroArgument *args, int arg_count, const char *name);
+Expression *macro_get_arg(const MacroArgumentList *args, const char *name);
+
+// Expression evaluation helpers (exposed for macro implementations)
+double painter_evaluate_expression(const Expression *expr, VariableContext *ctx);
+
+// Palette helpers shared between the interpreter and macros
+int painter_palette_get_or_add(char ***palette, int *palette_size, int *palette_capacity,
+                               const char *block_string);
+void painter_format_block(char *buffer, size_t buffer_size,
+                          const char *block_name, const char *block_properties);

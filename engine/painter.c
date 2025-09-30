@@ -4,6 +4,117 @@
 #include <stdlib.h>
 #include <string.h>
 
+// -----------------------------------------------------------------------------
+// Internal utility helpers
+// -----------------------------------------------------------------------------
+
+static bool ensure_capacity(Parser *parser, void **buffer, size_t *capacity,
+                            size_t count, size_t element_size) {
+  if (*capacity > count) {
+    return true;
+  }
+
+  size_t new_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+  void *resized = realloc(*buffer, new_capacity * element_size);
+  if (!resized) {
+    if (parser) {
+      parser_error(parser, "Out of memory");
+    }
+    return false;
+  }
+
+  *buffer = resized;
+  *capacity = new_capacity;
+  return true;
+}
+
+static inline void instruction_list_reset(InstructionList *list) {
+  list->items = NULL;
+  list->count = 0;
+  list->capacity = 0;
+}
+
+static inline void expression_list_reset(ExpressionList *list) {
+  list->items = NULL;
+  list->count = 0;
+  list->capacity = 0;
+}
+
+static inline void macro_argument_list_reset(MacroArgumentList *list) {
+  list->items = NULL;
+  list->count = 0;
+  list->capacity = 0;
+}
+
+static inline void palette_entry_list_reset(PaletteEntryList *list) {
+  list->items = NULL;
+  list->count = 0;
+  list->capacity = 0;
+}
+
+static bool instruction_list_push(Parser *parser, InstructionList *list, Instruction *instr) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
+                       list->count, sizeof(*list->items))) {
+    return false;
+  }
+  list->items[list->count++] = instr;
+  return true;
+}
+
+static bool expression_list_push(Parser *parser, ExpressionList *list, Expression *expr) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
+                       list->count, sizeof(*list->items))) {
+    return false;
+  }
+  list->items[list->count++] = expr;
+  return true;
+}
+
+static bool macro_argument_list_push(Parser *parser, MacroArgumentList *list, MacroArgument argument) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
+                       list->count, sizeof(*list->items))) {
+    return false;
+  }
+  list->items[list->count++] = argument;
+  return true;
+}
+
+static bool palette_entry_list_push(Parser *parser, PaletteEntryList *list, PaletteEntry entry) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
+                       list->count, sizeof(*list->items))) {
+    return false;
+  }
+  list->items[list->count++] = entry;
+  return true;
+}
+
+static bool program_ensure_capacity(Parser *parser, Program *program) {
+  if (program->instruction_count < program->instruction_capacity) {
+    return true;
+  }
+
+  int new_capacity = (program->instruction_capacity == 0) ? 32 : program->instruction_capacity * 2;
+  Instruction **resized = realloc(program->instructions, sizeof(*program->instructions) * new_capacity);
+  if (!resized) {
+    if (parser) {
+      parser_error(parser, "Out of memory");
+    }
+    return false;
+  }
+
+  program->instructions = resized;
+  program->instruction_capacity = new_capacity;
+  return true;
+}
+
+static bool program_push_instruction(Parser *parser, Program *program, Instruction *instr) {
+  if (!program_ensure_capacity(parser, program)) {
+    return false;
+  }
+  program->instructions[program->instruction_count++] = instr;
+  return true;
+}
+
 // Forward declarations
 static Expression *parse_expression(Parser *parser);
 static Expression *parse_primary(Parser *parser);
@@ -327,19 +438,10 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
   expr->type = EXPR_FUNCTION_CALL;
   strncpy(expr->function_call.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   expr->function_call.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  expr->function_call.arg_count = 0;
-  expr->function_call.args = NULL;
+  expression_list_reset(&expr->function_call.args);
 
   // Parse arguments if any
   if (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
-    int capacity = 4;
-    expr->function_call.args = malloc(sizeof(Expression *) * capacity);
-    if (!expr->function_call.args) {
-      parser_error(parser, "Out of memory");
-      free(expr);
-      return NULL;
-    }
-
     while (true) {
       Expression *arg = parse_expression(parser);
       if (!arg) {
@@ -347,20 +449,11 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
         return NULL;
       }
 
-      // Resize if needed
-      if (expr->function_call.arg_count >= capacity) {
-        capacity *= 2;
-        Expression **resized = realloc(expr->function_call.args, sizeof(Expression *) * capacity);
-        if (!resized) {
-          parser_error(parser, "Out of memory");
-          expression_free(arg);
-          expression_free(expr);
-          return NULL;
-        }
-        expr->function_call.args = resized;
+      if (!expression_list_push(parser, &expr->function_call.args, arg)) {
+        expression_free(arg);
+        expression_free(expr);
+        return NULL;
       }
-
-      expr->function_call.args[expr->function_call.arg_count++] = arg;
 
       if (!consume(TOKEN_COMMA)) break;
     }
@@ -442,6 +535,7 @@ static BlockPlacement parse_block_placement(Parser *parser) {
 
 static ForLoop parse_for_loop(Parser *parser) {
   ForLoop loop = {0};
+  instruction_list_reset(&loop.body);
   
   // 'for' keyword is already consumed by caller
   
@@ -480,19 +574,15 @@ static ForLoop parse_for_loop(Parser *parser) {
     return loop;
   }
 
-  // Parse body instructions
-  int capacity = 8;
-  loop.body = malloc(sizeof(Instruction *) * capacity);
-  loop.body_count = 0;
-
   while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
     Instruction *instr = parse_instruction(parser);
-    if (instr) {
-      if (loop.body_count >= capacity) {
-        capacity *= 2;
-        loop.body = realloc(loop.body, sizeof(Instruction *) * capacity);
-      }
-      loop.body[loop.body_count++] = instr;
+    if (!instr) {
+      if (parser->has_error) break;
+      continue;
+    }
+    if (!instruction_list_push(parser, &loop.body, instr)) {
+      instruction_free(instr);
+      break;
     }
   }
 
@@ -529,33 +619,18 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
 
   strncpy(occurrence.type, type_name, MAX_TOKEN_VALUE_LENGTH - 1);
   occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-
-  occurrence.args = NULL;
-  occurrence.arg_count = 0;
+  expression_list_reset(&occurrence.args);
+  instruction_list_reset(&occurrence.body);
 
   if (consume(TOKEN_LEFT_PAREN)) {
-    int capacity = 4;
-    occurrence.args = malloc(sizeof(Expression *) * capacity);
-    if (!occurrence.args) {
-      parser_error(parser, "Out of memory");
-      return occurrence;
-    }
-
     while (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
       Expression *arg = parse_expression(parser);
       if (!arg) return occurrence;
 
-      if (occurrence.arg_count >= capacity) {
-        capacity *= 2;
-        Expression **resized = realloc(occurrence.args, sizeof(Expression *) * capacity);
-        if (!resized) {
-          parser_error(parser, "Out of memory");
-          return occurrence;
-        }
-        occurrence.args = resized;
+      if (!expression_list_push(parser, &occurrence.args, arg)) {
+        expression_free(arg);
+        return occurrence;
       }
-
-      occurrence.args[occurrence.arg_count++] = arg;
       if (!consume(TOKEN_COMMA)) break;
     }
 
@@ -576,28 +651,15 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
     return occurrence;
   }
 
-  int body_capacity = 8;
-  occurrence.body = malloc(sizeof(Instruction *) * body_capacity);
-  occurrence.body_count = 0;
-
-  if (!occurrence.body) {
-    parser_error(parser, "Out of memory");
-    return occurrence;
-  }
-
   while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
     Instruction *instr = parse_instruction(parser);
-    if (instr) {
-    if (occurrence.body_count >= body_capacity) {
-      body_capacity *= 2;
-      Instruction **resized = realloc(occurrence.body, sizeof(Instruction *) * body_capacity);
-      if (!resized) {
-        parser_error(parser, "Out of memory");
-        return occurrence;
-      }
-      occurrence.body = resized;
+    if (!instr) {
+      if (parser->has_error) break;
+      continue;
     }
-      occurrence.body[occurrence.body_count++] = instr;
+    if (!instruction_list_push(parser, &occurrence.body, instr)) {
+      instruction_free(instr);
+      break;
     }
   }
 
@@ -610,15 +672,12 @@ static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_na
 
 static PaletteDefinition parse_palette_definition(Parser *parser) {
   PaletteDefinition palette = {0};
+  palette_entry_list_reset(&palette.entries);
   
   // Name is already parsed in assignment
   if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' for palette definition")) {
     return palette;
   }
-
-  int capacity = 16;
-  palette.entries = malloc(sizeof(PaletteEntry) * capacity);
-  palette.entry_count = 0;
 
   while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
     // Parse key
@@ -665,11 +724,9 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
       }
     }
 
-    if (palette.entry_count >= capacity) {
-      capacity *= 2;
-      palette.entries = realloc(palette.entries, sizeof(PaletteEntry) * capacity);
+    if (!palette_entry_list_push(parser, &palette.entries, entry)) {
+      break;
     }
-    palette.entries[palette.entry_count++] = entry;
 
     // Optional comma or newline
     consume(TOKEN_COMMA);
@@ -684,6 +741,7 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
 
 static MacroCall parse_macro_call(Parser *parser) {
   MacroCall macro = {0};
+  macro_argument_list_reset(&macro.arguments);
   
   // Consume '#'
   next();
@@ -700,15 +758,6 @@ static MacroCall parse_macro_call(Parser *parser) {
   next();
   
   // Parse arguments (.name=value)
-  int capacity = 8;
-  macro.arguments = malloc(sizeof(MacroArgument) * capacity);
-  macro.argument_count = 0;
-  
-  if (!macro.arguments) {
-    parser_error(parser, "Out of memory");
-    return macro;
-  }
-  
   while (consume(TOKEN_DOT)) {
     Token arg_name_token = peek();
     if (arg_name_token.type != TOKEN_IDENTIFIER) {
@@ -729,18 +778,11 @@ static MacroCall parse_macro_call(Parser *parser) {
     if (!arg.value) {
       return macro;
     }
-    
-    if (macro.argument_count >= capacity) {
-      capacity *= 2;
-      MacroArgument *resized = realloc(macro.arguments, sizeof(MacroArgument) * capacity);
-      if (!resized) {
-        parser_error(parser, "Out of memory");
-        return macro;
-      }
-      macro.arguments = resized;
+
+    if (!macro_argument_list_push(parser, &macro.arguments, arg)) {
+      expression_free(arg.value);
+      return macro;
     }
-    
-    macro.arguments[macro.argument_count++] = arg;
   }
   
   return macro;
@@ -861,19 +903,17 @@ Program *parse_program(Parser *parser) {
     return NULL;
   }
 
-  program->instruction_capacity = 32;
+  program->instructions = NULL;
   program->instruction_count = 0;
-  program->instructions = malloc(sizeof(Instruction *) * program->instruction_capacity);
+  program->instruction_capacity = 0;
 
   while (peek_type() != TOKEN_EOF && !parser->has_error) {
     Instruction *instr = parse_instruction(parser);
     if (instr) {
-      if (program->instruction_count >= program->instruction_capacity) {
-        program->instruction_capacity *= 2;
-        program->instructions = realloc(program->instructions, 
-                                       sizeof(Instruction *) * program->instruction_capacity);
+      if (!program_push_instruction(parser, program, instr)) {
+        instruction_free(instr);
+        break;
       }
-      program->instructions[program->instruction_count++] = instr;
     } else if (parser->has_error) {
       break;
     }
@@ -904,10 +944,10 @@ void expression_free(Expression *expr) {
       expression_free(expr->coordinate.z);
       break;
     case EXPR_FUNCTION_CALL:
-      for (int i = 0; i < expr->function_call.arg_count; i++) {
-        expression_free(expr->function_call.args[i]);
+      for (size_t i = 0; i < expr->function_call.args.count; i++) {
+        expression_free(expr->function_call.args.items[i]);
       }
-      free(expr->function_call.args);
+      free(expr->function_call.args.items);
       break;
     default:
       break;
@@ -929,30 +969,30 @@ void instruction_free(Instruction *instr) {
     case INSTR_FOR_LOOP:
       expression_free(instr->for_loop.start);
       expression_free(instr->for_loop.end);
-      for (int i = 0; i < instr->for_loop.body_count; i++) {
-        instruction_free(instr->for_loop.body[i]);
+      for (size_t i = 0; i < instr->for_loop.body.count; i++) {
+        instruction_free(instr->for_loop.body.items[i]);
       }
-      free(instr->for_loop.body);
+      free(instr->for_loop.body.items);
       break;
     case INSTR_OCCURRENCE:
-      for (int i = 0; i < instr->occurrence.arg_count; i++) {
-        expression_free(instr->occurrence.args[i]);
+      for (size_t i = 0; i < instr->occurrence.args.count; i++) {
+        expression_free(instr->occurrence.args.items[i]);
       }
-      free(instr->occurrence.args);
+      free(instr->occurrence.args.items);
       expression_free(instr->occurrence.condition);
-      for (int i = 0; i < instr->occurrence.body_count; i++) {
-        instruction_free(instr->occurrence.body[i]);
+      for (size_t i = 0; i < instr->occurrence.body.count; i++) {
+        instruction_free(instr->occurrence.body.items[i]);
       }
-      free(instr->occurrence.body);
+      free(instr->occurrence.body.items);
       break;
     case INSTR_PALETTE_DEFINITION:
-      free(instr->palette_definition.entries);
+      free(instr->palette_definition.entries.items);
       break;
     case INSTR_MACRO_CALL:
-      for (int i = 0; i < instr->macro_call.argument_count; i++) {
-        expression_free(instr->macro_call.arguments[i].value);
+      for (size_t i = 0; i < instr->macro_call.arguments.count; i++) {
+        expression_free(instr->macro_call.arguments.items[i].value);
       }
-      free(instr->macro_call.arguments);
+      free(instr->macro_call.arguments.items);
       break;
   }
 
@@ -971,25 +1011,25 @@ void program_free(Program *program) {
 
 // Macro registry implementation
 void macro_registry_init(MacroRegistry *registry) {
-  registry->entry_capacity = 16;
+  registry->entries = NULL;
+  registry->entry_capacity = 0;
   registry->entry_count = 0;
-  registry->entries = malloc(sizeof(MacroRegistryEntry) * registry->entry_capacity);
 }
 
 void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator) {
-  if (registry->entry_count >= registry->entry_capacity) {
-    registry->entry_capacity *= 2;
-    registry->entries = realloc(registry->entries, sizeof(MacroRegistryEntry) * registry->entry_capacity);
+  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
+                       registry->entry_count, sizeof(*registry->entries))) {
+    return;
   }
   
-  strncpy(registry->entries[registry->entry_count].name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  registry->entries[registry->entry_count].name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  registry->entries[registry->entry_count].generator = generator;
-  registry->entry_count++;
+  MacroRegistryEntry *entry = &registry->entries[registry->entry_count++];
+  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  entry->generator = generator;
 }
 
 MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name) {
-  for (int i = 0; i < registry->entry_count; i++) {
+  for (size_t i = 0; i < registry->entry_count; i++) {
     if (strcmp(registry->entries[i].name, name) == 0) {
       return registry->entries[i].generator;
     }
@@ -1006,18 +1046,21 @@ void macro_registry_free(MacroRegistry *registry) {
 
 // Variable context implementation (moving from static to exported)
 void context_init(VariableContext *ctx) {
-  ctx->variable_capacity = 16;
+  ctx->variables = NULL;
+  ctx->variable_capacity = 0;
   ctx->variable_count = 0;
-  ctx->variables = malloc(sizeof(Variable) * ctx->variable_capacity);
 }
 
 void context_free(VariableContext *ctx) {
   free(ctx->variables);
+  ctx->variables = NULL;
+  ctx->variable_capacity = 0;
+  ctx->variable_count = 0;
 }
 
 void context_set(VariableContext *ctx, const char *name, double value) {
   // Check if variable already exists
-  for (int i = 0; i < ctx->variable_count; i++) {
+  for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
       ctx->variables[i].value = value;
       return;
@@ -1025,19 +1068,19 @@ void context_set(VariableContext *ctx, const char *name, double value) {
   }
   
   // Add new variable
-  if (ctx->variable_count >= ctx->variable_capacity) {
-    ctx->variable_capacity *= 2;
-    ctx->variables = realloc(ctx->variables, sizeof(Variable) * ctx->variable_capacity);
+  if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity,
+                       ctx->variable_count, sizeof(*ctx->variables))) {
+    return;
   }
   
-  strncpy(ctx->variables[ctx->variable_count].name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  ctx->variables[ctx->variable_count].name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  ctx->variables[ctx->variable_count].value = value;
-  ctx->variable_count++;
+  Variable *variable = &ctx->variables[ctx->variable_count++];
+  strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  variable->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  variable->value = value;
 }
 
 double context_get(VariableContext *ctx, const char *name) {
-  for (int i = 0; i < ctx->variable_count; i++) {
+  for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
       return ctx->variables[i].value;
     }
@@ -1046,10 +1089,11 @@ double context_get(VariableContext *ctx, const char *name) {
 }
 
 // Helper function to get macro argument by name
-Expression *macro_get_arg(MacroArgument *args, int arg_count, const char *name) {
-  for (int i = 0; i < arg_count; i++) {
-    if (strcmp(args[i].name, name) == 0) {
-      return args[i].value;
+Expression *macro_get_arg(const MacroArgumentList *args, const char *name) {
+  if (!args) return NULL;
+  for (size_t i = 0; i < args->count; i++) {
+    if (strcmp(args->items[i].name, name) == 0) {
+      return args->items[i].value;
     }
   }
   return NULL;
@@ -1071,27 +1115,41 @@ static int calculate_bits_per_entry(int palette_size) {
 }
 
 // Helper function to find or add a block to the palette
-static int get_palette_index(char ***palette, int *palette_size, int *palette_capacity, const char *block_string) {
-  // Search for existing block in palette
+int painter_palette_get_or_add(char ***palette, int *palette_size, int *palette_capacity,
+                               const char *block_string) {
+  if (!palette || !palette_size || !palette_capacity || !block_string) {
+    return -1;
+  }
+
   for (int i = 0; i < *palette_size; i++) {
     if (strcmp((*palette)[i], block_string) == 0) {
       return i;
     }
   }
-  
-  // Add new block to palette
-  if (*palette_size >= *palette_capacity) {
-    *palette_capacity *= 2;
-    *palette = realloc(*palette, sizeof(char *) * (*palette_capacity));
+
+  if (*palette_capacity <= *palette_size) {
+    int new_capacity = (*palette_capacity == 0) ? 8 : (*palette_capacity * 2);
+    char **resized = realloc(*palette, sizeof(char *) * new_capacity);
+    if (!resized) {
+      return -1;
+    }
+    *palette = resized;
+    *palette_capacity = new_capacity;
   }
-  
-  (*palette)[*palette_size] = malloc(strlen(block_string) + 1);
-  strcpy((*palette)[*palette_size], block_string);
+
+  char *copy = malloc(strlen(block_string) + 1);
+  if (!copy) {
+    return -1;
+  }
+  strcpy(copy, block_string);
+
+  (*palette)[*palette_size] = copy;
   return (*palette_size)++;
 }
 
 // Helper function to create a full block string (name + properties)
-static void create_block_string(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties) {
+void painter_format_block(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties) {
+  if (!buffer || buffer_size == 0) return;
   if (block_properties && block_properties[0] != '\0') {
     snprintf(buffer, buffer_size, "%s[%s]", block_name, block_properties);
   } else {
@@ -1100,36 +1158,45 @@ static void create_block_string(char *buffer, size_t buffer_size, const char *bl
 }
 
 // Helper function to evaluate an expression to a number
-static double evaluate_expression(Expression *expr, VariableContext *ctx) {
+double painter_evaluate_expression(const Expression *expr, VariableContext *ctx) {
   if (!expr) return 0.0;
-  
+
   switch (expr->type) {
     case EXPR_NUMBER:
       return expr->number;
     case EXPR_IDENTIFIER:
       return context_get(ctx, expr->identifier);
     case EXPR_BINARY_OP: {
-      double left = evaluate_expression(expr->binary.left, ctx);
-      double right = evaluate_expression(expr->binary.right, ctx);
+      double left = painter_evaluate_expression(expr->binary.left, ctx);
+      double right = painter_evaluate_expression(expr->binary.right, ctx);
       switch (expr->binary.op) {
         case OP_ADD: return left + right;
         case OP_SUBTRACT: return left - right;
         case OP_MULTIPLY: return left * right;
-        case OP_DIVIDE: return right != 0 ? left / right : 0;
+        case OP_DIVIDE: return (right != 0.0) ? left / right : 0.0;
         case OP_MODULO: return (int)left % (int)right;
-        default: return 0.0;
+        case OP_EQUAL: return left == right;
+        case OP_NOT_EQUAL: return left != right;
+        case OP_LESS: return left < right;
+        case OP_LESS_EQUAL: return left <= right;
+        case OP_GREATER: return left > right;
+        case OP_GREATER_EQUAL: return left >= right;
       }
+      break;
     }
     case EXPR_UNARY_OP: {
-      double operand = evaluate_expression(expr->unary.operand, ctx);
+      double operand = painter_evaluate_expression(expr->unary.operand, ctx);
       switch (expr->unary.op) {
         case OP_NEGATE: return -operand;
-        default: return 0.0;
       }
+      break;
     }
-    default:
-      return 0.0;
+    case EXPR_COORDINATE:
+    case EXPR_FUNCTION_CALL:
+      break;
   }
+
+  return 0.0;
 }
 
 // Forward declaration for recursive processing
@@ -1154,10 +1221,10 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
       
       if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
         // Evaluate coordinates
-        int x = (int)evaluate_expression(placement->coordinate->coordinate.x, ctx);
+        int x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, ctx);
         int y = placement->coordinate->coordinate.y ? 
-                (int)evaluate_expression(placement->coordinate->coordinate.y, ctx) : 0;
-        int z = (int)evaluate_expression(placement->coordinate->coordinate.z, ctx);
+                (int)painter_evaluate_expression(placement->coordinate->coordinate.y, ctx) : 0;
+        int z = (int)painter_evaluate_expression(placement->coordinate->coordinate.z, ctx);
         
         // Check if block is within this section
         if (x >= base_x && x < base_x + 16 &&
@@ -1175,12 +1242,15 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
           
           // Create full block string
           char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
-          create_block_string(block_string, sizeof(block_string), 
-                            placement->block_name, placement->block_properties);
+          painter_format_block(block_string, sizeof(block_string),
+                               placement->block_name, placement->block_properties);
           
           // Get or add to palette
-          int palette_index = get_palette_index(palette, palette_size, 
-                                               palette_capacity, block_string);
+          int palette_index = painter_palette_get_or_add(palette, palette_size,
+                                                         palette_capacity, block_string);
+          if (palette_index < 0) {
+            break;
+          }
           
           block_indices[block_index] = palette_index;
         }
@@ -1190,7 +1260,7 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
     
     case INSTR_ASSIGNMENT: {
       Assignment *assignment = &instr->assignment;
-      double value = evaluate_expression(assignment->value, ctx);
+      double value = painter_evaluate_expression(assignment->value, ctx);
       context_set(ctx, assignment->name, value);
       break;
     }
@@ -1199,8 +1269,8 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
       ForLoop *loop = &instr->for_loop;
       
       // Evaluate loop bounds
-      int start = (int)evaluate_expression(loop->start, ctx);
-      int end = (int)evaluate_expression(loop->end, ctx);
+      int start = (int)painter_evaluate_expression(loop->start, ctx);
+      int end = (int)painter_evaluate_expression(loop->end, ctx);
       
       // Execute loop body for each iteration
       for (int i = start; i < end; i++) {
@@ -1208,8 +1278,8 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
         context_set(ctx, loop->variable, (double)i);
         
         // Process all body instructions
-        for (int j = 0; j < loop->body_count; j++) {
-          process_instruction(loop->body[j], ctx, macro_registry, base_x, base_y, base_z,
+        for (size_t j = 0; j < loop->body.count; j++) {
+          process_instruction(loop->body.items[j], ctx, macro_registry, base_x, base_y, base_z,
                             block_indices, palette, palette_size, palette_capacity);
         }
       }
@@ -1223,7 +1293,7 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
       MacroGenerator generator = macro_registry_lookup(macro_registry, macro_call->name);
       if (generator) {
         // Execute the macro
-        generator(ctx, macro_call->arguments, macro_call->argument_count,
+        generator(ctx, &macro_call->arguments,
                  base_x, base_y, base_z, block_indices, palette, 
                  palette_size, palette_capacity);
       }
@@ -1257,7 +1327,8 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   int block_indices[4096] = {0};
   
   // Add air as the first palette entry
-  get_palette_index(&section->palette, &section->palette_size, &palette_capacity, "minecraft:air");
+  painter_palette_get_or_add(&section->palette, &section->palette_size,
+                             &palette_capacity, "minecraft:air");
   
   // Convert section coordinates to world coordinates
   int base_x = section_x * 16;
