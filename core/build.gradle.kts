@@ -32,68 +32,66 @@ sourceSets {
 tasks.register<Exec>("compileNativeLib") {
     group = "build"
     description = "Compile C code into a shared library"
-    
-    inputs.files(
-        file("$engineDir/painter.c"),
-        file("$engineDir/painter.h"),
-        file("$engineDir/tokenizer.c"),
-        file("$engineDir/tokenizer.h")
-    )
-    
+
+    // collect sources and headers from engineDir
+    val cSources = fileTree(engineDir) { include("**/*.c") }
+    val headers  = fileTree(engineDir) { include("**/*.h") }
+
+    inputs.files(cSources, headers)
+
     val libName = when {
         System.getProperty("os.name").lowercase().contains("mac") -> "libpainter.dylib"
         System.getProperty("os.name").lowercase().contains("windows") -> "painter.dll"
         else -> "libpainter.so"
     }
-    
+
     val outputLib = file("$nativeLibDir/$libName")
     outputs.file(outputLib)
-    
+
     doFirst {
         nativeLibDir.mkdirs()
+        // build command: clang -shared -fPIC -O2 -I<engineDir> -o <out> <all .c files>
+        commandLine(
+            "clang",
+            "-shared",
+            "-fPIC",
+            "-O2",
+            "-I${engineDir.absolutePath}",
+            "-o", outputLib.absolutePath,
+            *cSources.files.map { it.absolutePath }.toTypedArray()
+        )
     }
-    
-    commandLine(
-        "clang",
-        "-shared",
-        "-fPIC",
-        "-O2",
-        "-I$engineDir",
-        "-o", outputLib.absolutePath,
-        file("$engineDir/painter.c").absolutePath,
-        file("$engineDir/tokenizer.c").absolutePath
-    )
 }
 
 tasks.register<Exec>("generateJextract") {
     group = "build"
     description = "Generate Java bindings from C headers using jextract"
-    
-    inputs.files(
-        file("$engineDir/painter.h"),
-        file("$engineDir/tokenizer.h")
-    )
+
+    // collect all .h headers in engineDir
+    inputs.files(fileTree(engineDir) { include("**/*.h") })
     outputs.dir(generatedSourcesDir)
-    
+
     doFirst {
         generatedSourcesDir.deleteRecursively()
         generatedSourcesDir.mkdirs()
     }
-    
+
     // Find jextract in PATH
     val jextractPath = System.getenv("PATH")?.split(":")
         ?.map { file("$it/jextract") }
         ?.firstOrNull { it.exists() && it.canExecute() }
         ?.absolutePath
         ?: "jextract"
-    
+
+    // pick one main header to pass to jextract
+    val mainHeader = file("$engineDir/painter.h")
     commandLine(
         jextractPath,
         "--output", generatedSourcesDir.absolutePath,
         "--target-package", "net.minestom.painter.generated",
         "--header-class-name", "PainterNative",
         "-I", engineDir.absolutePath,
-        file("$engineDir/painter.h").absolutePath
+        mainHeader.absolutePath
     )
 }
 

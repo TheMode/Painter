@@ -1,4 +1,5 @@
 #include "painter.h"
+#include "builtin_macros.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1104,75 +1105,13 @@ static double evaluate_expression(Expression *expr, VariableContext *ctx) {
   }
 }
 
-// Built-in macro implementations
-
-// Sphere macro: #sphere .x=<x> .y=<y> .z=<z> .radius=<radius> .block=<block_name>
-// Generates a filled 3D sphere
-static void builtin_macro_sphere(VariableContext *ctx, MacroArgument *args, int arg_count,
-                                 int base_x, int base_y, int base_z,
-                                 int *block_indices, char ***palette, 
-                                 int *palette_size, int *palette_capacity) {
-  // Get arguments
-  Expression *x_expr = macro_get_arg(args, arg_count, "x");
-  Expression *y_expr = macro_get_arg(args, arg_count, "y");
-  Expression *z_expr = macro_get_arg(args, arg_count, "z");
-  Expression *radius_expr = macro_get_arg(args, arg_count, "radius");
-  Expression *block_expr = macro_get_arg(args, arg_count, "block");
-  
-  if (!x_expr || !radius_expr || !block_expr) {
-    return; // Missing required arguments
-  }
-  
-  int center_x = (int)evaluate_expression(x_expr, ctx);
-  int center_y = y_expr ? (int)evaluate_expression(y_expr, ctx) : 0;
-  int center_z = z_expr ? (int)evaluate_expression(z_expr, ctx) : 0;
-  int radius = (int)evaluate_expression(radius_expr, ctx);
-  
-  // Get block name (must be an identifier)
-  if (block_expr->type != EXPR_IDENTIFIER) {
-    return; // Block must be an identifier
-  }
-  
-  char block_string[MAX_TOKEN_VALUE_LENGTH];
-  create_block_string(block_string, sizeof(block_string), block_expr->identifier, "");
-  
-  // Generate filled 3D sphere using distance formula
-  for (int dy = -radius; dy <= radius; dy++) {
-    for (int dx = -radius; dx <= radius; dx++) {
-      for (int dz = -radius; dz <= radius; dz++) {
-        // Check if point is within sphere using 3D distance formula
-        if (dx * dx + dy * dy + dz * dz <= radius * radius) {
-          int x = center_x + dx;
-          int y = center_y + dy;
-          int z = center_z + dz;
-          
-          // Check if block is within this section
-          if (x >= base_x && x < base_x + 16 &&
-              y >= base_y && y < base_y + 16 &&
-              z >= base_z && z < base_z + 16) {
-            
-            // Calculate index in section
-            int local_x = x - base_x;
-            int local_y = y - base_y;
-            int local_z = z - base_z;
-            int index = local_y * 256 + local_z * 16 + local_x;
-            
-            // Get or create palette index for this block
-            int palette_index = get_palette_index(palette, palette_size, palette_capacity, block_string);
-            block_indices[index] = palette_index;
-          }
-        }
-      }
-    }
-  }
-}
-
 // Forward declaration for recursive processing
 static void process_instruction(Instruction *instr, VariableContext *ctx, 
                                 MacroRegistry *macro_registry,
                                 int base_x, int base_y, int base_z,
                                 int *block_indices, char ***palette, 
                                 int *palette_size, int *palette_capacity);
+
 
 // Process a single instruction and its effects on the section
 static void process_instruction(Instruction *instr, VariableContext *ctx,
@@ -1305,7 +1244,7 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   // Initialize and register built-in macros
   MacroRegistry macro_registry;
   macro_registry_init(&macro_registry);
-  macro_registry_register(&macro_registry, "sphere", builtin_macro_sphere);
+  register_builtin_macros(&macro_registry);
   
   // Process all instructions
   for (int i = 0; i < program->instruction_count; i++) {
