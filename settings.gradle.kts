@@ -4,3 +4,4 @@ plugins {
 rootProject.name = "Painter"
 
 include("core")
+include("minestom")

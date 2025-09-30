@@ -24,19 +24,3 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
-
-tasks.withType<JavaCompile> {
-    options.compilerArgs.addAll(listOf(
-        "--enable-preview",
-        "-Xlint:preview"
-    ))
-}
-
-tasks.test {
-    useJUnitPlatform()
-    jvmArgs("--enable-preview")
-}
-
-tasks.withType<JavaExec> {
-    jvmArgs("--enable-preview")
-}
