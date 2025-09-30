@@ -25,6 +25,7 @@ static Token handle_bang(Tokenizer *tokenizer);
 static Token handle_less(Tokenizer *tokenizer);
 static Token handle_greater(Tokenizer *tokenizer);
 static Token handle_dot(Tokenizer *tokenizer);
+static Token handle_slash(Tokenizer *tokenizer);
 static Token handle_comment(Tokenizer *tokenizer);
 static Token handle_unknown(Tokenizer *tokenizer);
 
@@ -52,12 +53,13 @@ static const TokenHandler token_handlers[256] = {
     ['+'] = handle_single_char,
     ['-'] = handle_single_char,
     ['*'] = handle_single_char,
-    ['/'] = handle_single_char,
+    ['/'] = handle_slash,
     ['='] = handle_equal,
     ['!'] = handle_bang,
     ['<'] = handle_less,
     ['>'] = handle_greater,
     ['?'] = handle_single_char,
+    ['@'] = handle_single_char,
     ['#'] = handle_comment,
     ['$'] = handle_single_char,
     ['~'] = handle_single_char,
@@ -217,6 +219,7 @@ static const TokenType single_char_map[256] = {
     ['<'] = TOKEN_LEFT_ANGLE,
     ['>'] = TOKEN_RIGHT_ANGLE,
     ['?'] = TOKEN_QUESTION,
+    ['@'] = TOKEN_AT,
     ['#'] = TOKEN_HASH,
     ['$'] = TOKEN_DOLLAR,
     ['~'] = TOKEN_TILDE,
@@ -306,6 +309,39 @@ static Token read_raw_string(Tokenizer *tokenizer) {
   token.length = (size_t)(write_ptr - token.value);
 
   return token;
+}
+
+static Token handle_slash(Tokenizer *tokenizer) {
+  const char *start = tokenizer->current;
+  next_char(tokenizer); // consume '/'
+
+  char next = peek_char(tokenizer);
+  if (next == '/') {
+    // Single-line comment
+    while (peek_char(tokenizer) != '\0' && peek_char(tokenizer) != '\n') {
+      next_char(tokenizer);
+    }
+    return tokenizer_next_token(tokenizer);
+  }
+
+  if (next == '*') {
+    // Multi-line comment
+    next_char(tokenizer); // consume '*'
+    while (true) {
+      char c = next_char(tokenizer);
+      if (c == '\0') {
+        // Unterminated comment, treat as EOF
+        return make_token(TOKEN_EOF, tokenizer->current, 0);
+      }
+      if (c == '*' && peek_char(tokenizer) == '/') {
+        next_char(tokenizer); // consume '/'
+        break;
+      }
+    }
+    return tokenizer_next_token(tokenizer);
+  }
+
+  return make_token(TOKEN_SLASH, start, 1);
 }
 
 static Token handle_comment(Tokenizer *tokenizer) {

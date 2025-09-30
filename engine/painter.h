@@ -3,6 +3,7 @@
 #include "tokenizer.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Forward declarations
 typedef struct Instruction Instruction;
@@ -141,10 +142,23 @@ typedef struct {
   int instruction_capacity;
 } Program;
 
+// Section structure (16x16x16 Minecraft section)
+typedef struct {
+  char **palette;           // Array of block strings (e.g., "air", "oak_planks[facing=east]")
+  int palette_size;         // Number of unique blocks in the palette
+  int bits_per_entry;       // Bits needed to represent each block index
+  uint64_t *data;           // Array of 64-bit integers holding block indices
+  int data_size;            // Number of uint64_t elements in data array
+} Section;
+
 // Parser API
 void parser_init(Parser *parser, const char *input);
 Program *parse_program(Parser *parser);
 void program_free(Program *program);
+
+// Section generation API
+Section *generate_section(Program *program, int section_x, int section_y, int section_z);
+void section_free(Section *section);
 
 // Helper functions
 void parser_error(Parser *parser, const char *message);

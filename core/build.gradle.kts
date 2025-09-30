@@ -16,13 +16,53 @@ java {
 
 val engineDir = file("../engine")
 val generatedSourcesDir = layout.buildDirectory.dir("generated/sources/jextract/java").get().asFile
+val nativeLibDir = layout.buildDirectory.dir("native").get().asFile
 
 sourceSets {
     main {
         java {
             srcDir(generatedSourcesDir)
         }
+        resources {
+            srcDir(nativeLibDir)
+        }
     }
+}
+
+tasks.register<Exec>("compileNativeLib") {
+    group = "build"
+    description = "Compile C code into a shared library"
+    
+    inputs.files(
+        file("$engineDir/painter.c"),
+        file("$engineDir/painter.h"),
+        file("$engineDir/tokenizer.c"),
+        file("$engineDir/tokenizer.h")
+    )
+    
+    val libName = when {
+        System.getProperty("os.name").lowercase().contains("mac") -> "libpainter.dylib"
+        System.getProperty("os.name").lowercase().contains("windows") -> "painter.dll"
+        else -> "libpainter.so"
+    }
+    
+    val outputLib = file("$nativeLibDir/$libName")
+    outputs.file(outputLib)
+    
+    doFirst {
+        nativeLibDir.mkdirs()
+    }
+    
+    commandLine(
+        "clang",
+        "-shared",
+        "-fPIC",
+        "-O2",
+        "-I$engineDir",
+        "-o", outputLib.absolutePath,
+        file("$engineDir/painter.c").absolutePath,
+        file("$engineDir/tokenizer.c").absolutePath
+    )
 }
 
 tasks.register<Exec>("generateJextract") {
@@ -58,7 +98,11 @@ tasks.register<Exec>("generateJextract") {
 }
 
 tasks.named("compileJava") {
-    dependsOn("generateJextract")
+    dependsOn("generateJextract", "compileNativeLib")
+}
+
+tasks.named("processResources") {
+    dependsOn("compileNativeLib")
 }
 
 tasks.register("cleanGenerated") {

@@ -10,11 +10,13 @@ static Expression *parse_additive(Parser *parser);
 static Expression *parse_multiplicative(Parser *parser);
 static Expression *parse_comparison(Parser *parser);
 static Expression *parse_coordinate(Parser *parser);
+static Expression *parse_function_call(Parser *parser, const char *name);
 static Instruction *parse_instruction(Parser *parser);
 static BlockPlacement parse_block_placement(Parser *parser);
-static Assignment parse_assignment(Parser *parser);
 static ForLoop parse_for_loop(Parser *parser);
 static Occurrence parse_occurrence(Parser *parser);
+static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_name);
+static Occurrence parse_named_occurrence(Parser *parser, const char *name);
 static PaletteDefinition parse_palette_definition(Parser *parser);
 
 // Parser initialization
@@ -59,13 +61,31 @@ static bool expect(Parser *parser, TokenType type, const char *message) {
 
 // Expression parsing
 static Expression *parse_primary(Parser *parser) {
-  Expression *expr = malloc(sizeof(Expression));
-  if (!expr) {
-    parser_error(parser, "Out of memory");
-    return NULL;
+  if (match(parser, TOKEN_AT)) {
+    if (!check(parser, TOKEN_IDENTIFIER)) {
+      parser_error(parser, "Expected identifier after '@'");
+      return NULL;
+    }
+
+    char function_name[MAX_TOKEN_VALUE_LENGTH];
+    strncpy(function_name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    function_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    advance(parser);
+
+    if (!match(parser, TOKEN_LEFT_PAREN)) {
+      parser_error(parser, "Expected '(' after function name");
+      return NULL;
+    }
+
+    return parse_function_call(parser, function_name);
   }
 
   if (check(parser, TOKEN_NUMBER)) {
+    Expression *expr = malloc(sizeof(Expression));
+    if (!expr) {
+      parser_error(parser, "Out of memory");
+      return NULL;
+    }
     expr->type = EXPR_NUMBER;
     expr->number = atof(parser->current_token.value);
     advance(parser);
@@ -73,27 +93,37 @@ static Expression *parse_primary(Parser *parser) {
   }
 
   if (check(parser, TOKEN_IDENTIFIER)) {
-    expr->type = EXPR_IDENTIFIER;
-    strncpy(expr->identifier, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-    expr->identifier[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    char identifier[MAX_TOKEN_VALUE_LENGTH];
+    strncpy(identifier, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    identifier[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     advance(parser);
+
+    if (match(parser, TOKEN_LEFT_PAREN)) {
+      return parse_function_call(parser, identifier);
+    }
+
+    Expression *expr = malloc(sizeof(Expression));
+    if (!expr) {
+      parser_error(parser, "Out of memory");
+      return NULL;
+    }
+    expr->type = EXPR_IDENTIFIER;
+    strncpy(expr->identifier, identifier, MAX_TOKEN_VALUE_LENGTH - 1);
+    expr->identifier[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     return expr;
   }
 
   if (match(parser, TOKEN_LEFT_BRACKET)) {
-    free(expr);
     return parse_coordinate(parser);
   }
 
   if (match(parser, TOKEN_LEFT_PAREN)) {
-    free(expr);
     Expression *inner = parse_expression(parser);
     expect(parser, TOKEN_RIGHT_PAREN, "Expected ')' after expression");
     return inner;
   }
 
   parser_error(parser, "Expected expression");
-  free(expr);
   return NULL;
 }
 
@@ -193,33 +223,44 @@ static Expression *parse_coordinate(Parser *parser) {
   Expression *coord = malloc(sizeof(Expression));
   coord->type = EXPR_COORDINATE;
   
+  // Parse first value (always x)
   coord->coordinate.x = parse_expression(parser);
   if (!coord->coordinate.x) {
     free(coord);
     return NULL;
   }
 
-  // Handle optional comma
+  // Handle optional comma after first expression (allow both "[x z]" and "[x, z]")
   match(parser, TOKEN_COMMA);
 
-  coord->coordinate.z = parse_expression(parser);
-  if (!coord->coordinate.z) {
-    expression_free(coord->coordinate.x);
-    free(coord);
-    return NULL;
-  }
-
-  // Check for optional y coordinate (third value)
   coord->coordinate.y = NULL;
-  if (match(parser, TOKEN_COMMA)) {
-    // If we have three values, reassign: x stays x, z becomes y, new value becomes z
-    coord->coordinate.y = coord->coordinate.z;
-    coord->coordinate.z = parse_expression(parser);
-    if (!coord->coordinate.z) {
+  coord->coordinate.z = NULL;
+
+  if (!check(parser, TOKEN_RIGHT_BRACKET)) {
+    // Parse second value (could be y or z depending on whether there's a third)
+    Expression *second = parse_expression(parser);
+    if (!second) {
       expression_free(coord->coordinate.x);
-      expression_free(coord->coordinate.y);
       free(coord);
       return NULL;
+    }
+
+    // Optional comma between second and third values
+    match(parser, TOKEN_COMMA);
+
+    if (!check(parser, TOKEN_RIGHT_BRACKET)) {
+      // Three values provided: [x y z]
+      coord->coordinate.y = second;
+      coord->coordinate.z = parse_expression(parser);
+      if (!coord->coordinate.z) {
+        expression_free(coord->coordinate.x);
+        expression_free(second);
+        free(coord);
+        return NULL;
+      }
+    } else {
+      // Two values provided: [x z], y defaults to 0
+      coord->coordinate.z = second;
     }
   }
 
@@ -234,14 +275,76 @@ static Expression *parse_coordinate(Parser *parser) {
   return coord;
 }
 
+static Expression *parse_function_call(Parser *parser, const char *name) {
+  Expression *expr = malloc(sizeof(Expression));
+  if (!expr) {
+    parser_error(parser, "Out of memory");
+    return NULL;
+  }
+
+  expr->type = EXPR_FUNCTION_CALL;
+  strncpy(expr->function_call.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  expr->function_call.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  expr->function_call.arg_count = 0;
+  expr->function_call.args = NULL;
+
+  int capacity = 0;
+  if (!check(parser, TOKEN_RIGHT_PAREN) && !check(parser, TOKEN_EOF)) {
+    capacity = 4;
+    expr->function_call.args = malloc(sizeof(Expression *) * capacity);
+    if (!expr->function_call.args) {
+      parser_error(parser, "Out of memory");
+      free(expr);
+      return NULL;
+    }
+
+    while (true) {
+      Expression *arg = parse_expression(parser);
+      if (!arg) {
+        expression_free(expr);
+        return NULL;
+      }
+
+      if (expr->function_call.arg_count >= capacity) {
+        capacity *= 2;
+        Expression **resized = realloc(expr->function_call.args, sizeof(Expression *) * capacity);
+        if (!resized) {
+          parser_error(parser, "Out of memory");
+          expression_free(expr);
+          return NULL;
+        }
+        expr->function_call.args = resized;
+      }
+
+      expr->function_call.args[expr->function_call.arg_count++] = arg;
+
+      if (!match(parser, TOKEN_COMMA)) {
+        break;
+      }
+    }
+  }
+
+  if (!expect(parser, TOKEN_RIGHT_PAREN, "Expected ')' after function arguments")) {
+    expression_free(expr);
+    return NULL;
+  }
+
+  return expr;
+}
+
 // Instruction parsing
 static BlockPlacement parse_block_placement(Parser *parser) {
   BlockPlacement placement = {0};
   
+  // Consume the opening [
+  if (!expect(parser, TOKEN_LEFT_BRACKET, "Expected '[' for coordinate")) {
+    return placement;
+  }
+  
   placement.coordinate = parse_coordinate(parser);
   if (!placement.coordinate) return placement;
 
-  // Parse block name
+  // Parse block name (optionally with namespace, e.g., "minecraft:grass_block")
   if (!check(parser, TOKEN_IDENTIFIER)) {
     parser_error(parser, "Expected block name");
     return placement;
@@ -251,45 +354,47 @@ static BlockPlacement parse_block_placement(Parser *parser) {
   placement.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   advance(parser);
 
+  // Check for namespace separator (:)
+  if (match(parser, TOKEN_COLON)) {
+    if (!check(parser, TOKEN_IDENTIFIER)) {
+      parser_error(parser, "Expected block name after ':'");
+      return placement;
+    }
+    // Append the colon and the rest of the name
+    size_t current_len = strlen(placement.block_name);
+    if (current_len < MAX_TOKEN_VALUE_LENGTH - 1) {
+      placement.block_name[current_len] = ':';
+      strncpy(placement.block_name + current_len + 1, 
+              parser->current_token.value, 
+              MAX_TOKEN_VALUE_LENGTH - current_len - 2);
+      placement.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    }
+    advance(parser);
+  }
+
   // Parse optional block properties [key=value,...]
   placement.block_properties[0] = '\0';
-  if (match(parser, TOKEN_LEFT_BRACKET)) {
-    // Read everything until ]
-    size_t offset = 0;
-    while (!check(parser, TOKEN_RIGHT_BRACKET) && !check(parser, TOKEN_EOF)) {
-      const char *token_str = parser->current_token.value;
-      size_t token_len = strlen(token_str);
-      
-      if (offset + token_len < MAX_TOKEN_VALUE_LENGTH - 1) {
-        strcpy(placement.block_properties + offset, token_str);
-        offset += token_len;
+  if (check(parser, TOKEN_LEFT_BRACKET)) {
+    Token peek = tokenizer_peek_token(&parser->tokenizer);
+    if (peek.type == TOKEN_IDENTIFIER || peek.type == TOKEN_RIGHT_BRACKET) {
+      advance(parser); // consume '['
+
+      size_t offset = 0;
+      while (!check(parser, TOKEN_RIGHT_BRACKET) && !check(parser, TOKEN_EOF)) {
+        const char *token_str = parser->current_token.value;
+        size_t token_len = strlen(token_str);
+
+        if (offset + token_len < MAX_TOKEN_VALUE_LENGTH - 1) {
+          strcpy(placement.block_properties + offset, token_str);
+          offset += token_len;
+        }
+        advance(parser);
       }
-      advance(parser);
+      expect(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after block properties");
     }
-    expect(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after block properties");
   }
 
   return placement;
-}
-
-static Assignment parse_assignment(Parser *parser) {
-  Assignment assignment = {0};
-  
-  strncpy(assignment.name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  assignment.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  advance(parser); // consume identifier
-
-  expect(parser, TOKEN_EQUAL, "Expected '=' in assignment");
-  
-  // Check if this is a palette or occurrence definition
-  if (check(parser, TOKEN_LEFT_BRACE) || check(parser, TOKEN_HASH)) {
-    // This will be handled by the caller
-    assignment.value = NULL;
-    return assignment;
-  }
-
-  assignment.value = parse_expression(parser);
-  return assignment;
 }
 
 static ForLoop parse_for_loop(Parser *parser) {
@@ -306,12 +411,12 @@ static ForLoop parse_for_loop(Parser *parser) {
   loop.variable[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   advance(parser);
 
-  if (!tokenizer_consume_value(&parser->tokenizer, TOKEN_IDENTIFIER, "in")) {
-    expect(parser, TOKEN_IDENTIFIER, "Expected 'in' after loop variable");
-    parser->current_token = tokenizer_peek_token(&parser->tokenizer);
-  } else {
-    parser->current_token = tokenizer_next_token(&parser->tokenizer);
+  if (parser->current_token.type != TOKEN_IDENTIFIER ||
+      strcmp(parser->current_token.value, "in") != 0) {
+    parser_error(parser, "Expected 'in' after loop variable");
+    return loop;
   }
+  advance(parser); // consume 'in'
 
   loop.start = parse_expression(parser);
   if (!loop.start) return loop;
@@ -349,61 +454,99 @@ static ForLoop parse_for_loop(Parser *parser) {
 
 static Occurrence parse_occurrence(Parser *parser) {
   Occurrence occurrence = {0};
-  
+
   advance(parser); // consume '@'
-  
+
   if (!check(parser, TOKEN_IDENTIFIER)) {
     parser_error(parser, "Expected occurrence type");
     return occurrence;
   }
 
-  strncpy(occurrence.type, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  char type_name[MAX_TOKEN_VALUE_LENGTH];
+  strncpy(type_name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  type_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   advance(parser);
 
-  // Parse arguments
+  return parse_occurrence_from_type(parser, type_name);
+}
+
+static Occurrence parse_named_occurrence(Parser *parser, const char *name) {
+  return parse_occurrence_from_type(parser, name);
+}
+
+static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_name) {
+  Occurrence occurrence = {0};
+
+  strncpy(occurrence.type, type_name, MAX_TOKEN_VALUE_LENGTH - 1);
+  occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+
+  occurrence.args = NULL;
+  occurrence.arg_count = 0;
+
   if (match(parser, TOKEN_LEFT_PAREN)) {
     int capacity = 4;
     occurrence.args = malloc(sizeof(Expression *) * capacity);
-    occurrence.arg_count = 0;
+    if (!occurrence.args) {
+      parser_error(parser, "Out of memory");
+      return occurrence;
+    }
 
     while (!check(parser, TOKEN_RIGHT_PAREN) && !check(parser, TOKEN_EOF)) {
       Expression *arg = parse_expression(parser);
-      if (arg) {
-        if (occurrence.arg_count >= capacity) {
-          capacity *= 2;
-          occurrence.args = realloc(occurrence.args, sizeof(Expression *) * capacity);
-        }
-        occurrence.args[occurrence.arg_count++] = arg;
+      if (!arg) {
+        return occurrence;
       }
-      
-      if (!match(parser, TOKEN_COMMA)) break;
+
+      if (occurrence.arg_count >= capacity) {
+        capacity *= 2;
+        Expression **resized = realloc(occurrence.args, sizeof(Expression *) * capacity);
+        if (!resized) {
+          parser_error(parser, "Out of memory");
+          return occurrence;
+        }
+        occurrence.args = resized;
+      }
+
+      occurrence.args[occurrence.arg_count++] = arg;
+
+      if (!match(parser, TOKEN_COMMA)) {
+        break;
+      }
     }
 
     expect(parser, TOKEN_RIGHT_PAREN, "Expected ')' after occurrence arguments");
   }
 
-  // Parse optional condition
   occurrence.condition = NULL;
   if (check(parser, TOKEN_RIGHT_ANGLE) || check(parser, TOKEN_LEFT_ANGLE) ||
-      check(parser, TOKEN_EQUAL_EQUAL) || check(parser, TOKEN_NOT_EQUAL)) {
+      check(parser, TOKEN_EQUAL_EQUAL) || check(parser, TOKEN_NOT_EQUAL) ||
+      check(parser, TOKEN_GREATER_EQUAL) || check(parser, TOKEN_LESS_EQUAL)) {
     occurrence.condition = parse_expression(parser);
   }
 
   expect(parser, TOKEN_LEFT_BRACE, "Expected '{' after occurrence header");
 
-  // Parse body instructions
-  int capacity = 8;
-  occurrence.body = malloc(sizeof(Instruction *) * capacity);
+  int body_capacity = 8;
+  occurrence.body = malloc(sizeof(Instruction *) * body_capacity);
   occurrence.body_count = 0;
+
+  if (!occurrence.body) {
+    parser_error(parser, "Out of memory");
+    return occurrence;
+  }
 
   while (!check(parser, TOKEN_RIGHT_BRACE) && !check(parser, TOKEN_EOF)) {
     Instruction *instr = parse_instruction(parser);
     if (instr) {
-      if (occurrence.body_count >= capacity) {
-        capacity *= 2;
-        occurrence.body = realloc(occurrence.body, sizeof(Instruction *) * capacity);
+    if (occurrence.body_count >= body_capacity) {
+      body_capacity *= 2;
+      Instruction **resized = realloc(occurrence.body, sizeof(Instruction *) * body_capacity);
+      if (!resized) {
+        parser_error(parser, "Out of memory");
+        return occurrence;
       }
+      occurrence.body = resized;
+    }
       occurrence.body[occurrence.body_count++] = instr;
     }
   }
@@ -511,7 +654,7 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   // Occurrence: @type(...) { ... } or variable = @type(...)
-  if (check(parser, TOKEN_HASH)) {
+  if (check(parser, TOKEN_AT)) {
     instr->type = INSTR_OCCURRENCE;
     instr->occurrence = parse_occurrence(parser);
     if (parser->has_error) {
@@ -523,11 +666,12 @@ static Instruction *parse_instruction(Parser *parser) {
 
   // Assignment or palette definition: name = value or name = { ... }
   if (check(parser, TOKEN_IDENTIFIER)) {
+    char name[MAX_TOKEN_VALUE_LENGTH];
+    strncpy(name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+
     Token next = tokenizer_peek_token(&parser->tokenizer);
     if (next.type == TOKEN_EQUAL) {
-      char name[MAX_TOKEN_VALUE_LENGTH];
-      strncpy(name, parser->current_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-      name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
       advance(parser); // consume identifier
       advance(parser); // consume '='
 
@@ -543,7 +687,7 @@ static Instruction *parse_instruction(Parser *parser) {
           return NULL;
         }
         return instr;
-      } else if (check(parser, TOKEN_HASH)) {
+      } else if (check(parser, TOKEN_AT)) {
         instr->type = INSTR_OCCURRENCE;
         instr->occurrence = parse_occurrence(parser);
         if (parser->has_error) {
@@ -562,6 +706,15 @@ static Instruction *parse_instruction(Parser *parser) {
         }
         return instr;
       }
+    } else if (next.type == TOKEN_LEFT_BRACE) {
+      advance(parser); // consume identifier
+      instr->type = INSTR_OCCURRENCE;
+      instr->occurrence = parse_named_occurrence(parser, name);
+      if (parser->has_error) {
+        free(instr);
+        return NULL;
+      }
+      return instr;
     }
   }
 
@@ -674,4 +827,178 @@ void program_free(Program *program) {
   }
   free(program->instructions);
   free(program);
+}
+
+// Helper function to calculate bits per entry based on palette size
+static int calculate_bits_per_entry(int palette_size) {
+  if (palette_size <= 1) return 0;
+  
+  // Calculate the minimum number of bits needed to represent (palette_size - 1)
+  // This is equivalent to floor(log2(palette_size - 1)) + 1
+  int bits = 0;
+  int temp = palette_size - 1;
+  while (temp > 0) {
+    bits++;
+    temp >>= 1;
+  }
+  return bits;
+}
+
+// Helper function to find or add a block to the palette
+static int get_palette_index(char ***palette, int *palette_size, int *palette_capacity, const char *block_string) {
+  // Search for existing block in palette
+  for (int i = 0; i < *palette_size; i++) {
+    if (strcmp((*palette)[i], block_string) == 0) {
+      return i;
+    }
+  }
+  
+  // Add new block to palette
+  if (*palette_size >= *palette_capacity) {
+    *palette_capacity *= 2;
+    *palette = realloc(*palette, sizeof(char *) * (*palette_capacity));
+  }
+  
+  (*palette)[*palette_size] = malloc(strlen(block_string) + 1);
+  strcpy((*palette)[*palette_size], block_string);
+  return (*palette_size)++;
+}
+
+// Helper function to create a full block string (name + properties)
+static void create_block_string(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties) {
+  if (block_properties && block_properties[0] != '\0') {
+    snprintf(buffer, buffer_size, "%s[%s]", block_name, block_properties);
+  } else {
+    snprintf(buffer, buffer_size, "%s", block_name);
+  }
+}
+
+// Helper function to evaluate an expression to a number
+static double evaluate_expression(Expression *expr) {
+  if (!expr) return 0.0;
+  
+  switch (expr->type) {
+    case EXPR_NUMBER:
+      return expr->number;
+    case EXPR_BINARY_OP: {
+      double left = evaluate_expression(expr->binary.left);
+      double right = evaluate_expression(expr->binary.right);
+      switch (expr->binary.op) {
+        case OP_ADD: return left + right;
+        case OP_SUBTRACT: return left - right;
+        case OP_MULTIPLY: return left * right;
+        case OP_DIVIDE: return right != 0 ? left / right : 0;
+        case OP_MODULO: return (int)left % (int)right;
+        default: return 0.0;
+      }
+    }
+    default:
+      return 0.0;
+  }
+}
+
+// Section generation function
+Section *generate_section(Program *program, int section_x, int section_y, int section_z) {
+  if (!program) return NULL;
+  
+  Section *section = malloc(sizeof(Section));
+  if (!section) return NULL;
+  
+  // Initialize palette
+  int palette_capacity = 16;
+  section->palette = malloc(sizeof(char *) * palette_capacity);
+  section->palette_size = 0;
+  
+  // Initialize block array (16x16x16 = 4096 blocks)
+  // Using air as default (index 0)
+  int block_indices[4096] = {0};
+  
+  // Add air as the first palette entry
+  get_palette_index(&section->palette, &section->palette_size, &palette_capacity, "minecraft:air");
+  
+  // Convert section coordinates to world coordinates
+  int base_x = section_x * 16;
+  int base_y = section_y * 16;
+  int base_z = section_z * 16;
+  
+  // Process all instructions
+  for (int i = 0; i < program->instruction_count; i++) {
+    Instruction *instr = program->instructions[i];
+    
+    if (instr->type == INSTR_BLOCK_PLACEMENT) {
+      BlockPlacement *placement = &instr->block_placement;
+      
+      if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
+        // Evaluate coordinates
+        int x = (int)evaluate_expression(placement->coordinate->coordinate.x);
+        int y = placement->coordinate->coordinate.y ? 
+                (int)evaluate_expression(placement->coordinate->coordinate.y) : 0;
+        int z = (int)evaluate_expression(placement->coordinate->coordinate.z);
+        
+        // Check if block is within this section
+        if (x >= base_x && x < base_x + 16 &&
+            y >= base_y && y < base_y + 16 &&
+            z >= base_z && z < base_z + 16) {
+          
+          // Convert to section-local coordinates
+          int local_x = x - base_x;
+          int local_y = y - base_y;
+          int local_z = z - base_z;
+          
+          // Calculate index in block array
+          // Standard Minecraft format: y*256 + z*16 + x (array[y][z][x])
+          int block_index = local_y * 256 + local_z * 16 + local_x;
+          // Create full block string
+          char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
+          create_block_string(block_string, sizeof(block_string), 
+                            placement->block_name, placement->block_properties);
+          
+          // Get or add to palette
+          int palette_index = get_palette_index(&section->palette, &section->palette_size, 
+                                               &palette_capacity, block_string);
+          
+          block_indices[block_index] = palette_index;
+        }
+      }
+    }
+    // TODO: Handle FOR_LOOP, OCCURRENCE, etc. for full implementation
+  }
+  
+  // Calculate bits per entry
+  section->bits_per_entry = calculate_bits_per_entry(section->palette_size);
+  
+  // Pack block indices into data array
+  if (section->bits_per_entry == 0) {
+    // All blocks are the same, no data needed
+    section->data_size = 0;
+    section->data = NULL;
+  } else {
+    int blocks_per_long = 64 / section->bits_per_entry;
+    section->data_size = (4096 + blocks_per_long - 1) / blocks_per_long; // Ceiling division
+    section->data = calloc(section->data_size, sizeof(uint64_t));
+    
+    // Pack the indices
+    for (int i = 0; i < 4096; i++) {
+      int long_index = i / blocks_per_long;
+      int offset_in_long = (i % blocks_per_long) * section->bits_per_entry;
+      section->data[long_index] |= ((uint64_t)block_indices[i]) << offset_in_long;
+    }
+  }
+  
+  return section;
+}
+
+void section_free(Section *section) {
+  if (!section) return;
+  
+  // Free palette strings
+  for (int i = 0; i < section->palette_size; i++) {
+    free(section->palette[i]);
+  }
+  free(section->palette);
+  
+  // Free data array
+  free(section->data);
+  
+  free(section);
 }
