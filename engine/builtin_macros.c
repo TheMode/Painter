@@ -1,13 +1,13 @@
 #include "builtin_macros.h"
 // Sphere macro: #sphere .x=<x> .y=<y> .z=<z> .radius=<radius> .block=<block_name>
 // Generates a filled 3D sphere
-void builtin_macro_sphere(ExecutionState *state, const MacroArgumentList *args) {
+void builtin_macro_sphere(ExecutionState *state, const NamedArgumentList *args) {
   // Get arguments
-  Expression *x_expr = macro_get_arg(args, "x");
-  Expression *y_expr = macro_get_arg(args, "y");
-  Expression *z_expr = macro_get_arg(args, "z");
-  Expression *radius_expr = macro_get_arg(args, "radius");
-  Expression *block_expr = macro_get_arg(args, "block");
+  Expression *x_expr = named_arg_get(args, "x");
+  Expression *y_expr = named_arg_get(args, "y");
+  Expression *z_expr = named_arg_get(args, "z");
+  Expression *radius_expr = named_arg_get(args, "radius");
+  Expression *block_expr = named_arg_get(args, "block");
 
   if (!radius_expr || !block_expr) {
     return; // Missing required arguments

@@ -32,15 +32,24 @@ static void compute_iteration_bounds(int origin, int step, int range_min, int ra
   }
 }
 
-static void occurrence_every(const double *args, size_t arg_count, const InstructionList *body, int origin_x, int origin_y, int origin_z,
+static void occurrence_every(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
     OccurrenceRuntime *runtime) {
-  if (!runtime || !runtime->run_body || !body || body->count == 0 || arg_count < 3) {
+  if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
     return;
   }
 
-  int step_x = (int)llround(args[0]);
-  int step_y = (int)llround(args[1]);
-  int step_z = (int)llround(args[2]);
+  // Get named arguments: .x, .y, .z for step sizes
+  Expression *step_x_expr = named_arg_get(args, "x");
+  Expression *step_y_expr = named_arg_get(args, "y");
+  Expression *step_z_expr = named_arg_get(args, "z");
+
+  if (!step_x_expr || !step_y_expr || !step_z_expr) {
+    return; // Missing required arguments
+  }
+
+  int step_x = (int)llround(painter_evaluate_expression(step_x_expr, state));
+  int step_y = (int)llround(painter_evaluate_expression(step_y_expr, state));
+  int step_z = (int)llround(painter_evaluate_expression(step_z_expr, state));
 
   const int SEARCH_MARGIN = 16;
 
@@ -68,7 +77,7 @@ static void occurrence_every(const double *args, size_t arg_count, const Instruc
   }
 }
 
-// @noise(frequency, seed, [threshold], [amplitude], [base_y])
+// @noise .frequency=<val> .seed=<val> [.threshold=<val>] [.amplitude=<val>] [.base_y=<val>]
 // General-purpose noise-based occurrence
 // - frequency: controls feature density/smoothness (e.g., 0.01-0.1)
 // - seed: random seed for reproducible patterns
@@ -77,20 +86,31 @@ static void occurrence_every(const double *args, size_t arg_count, const Instruc
 // - base_y: optional, base Y level when using amplitude (default 0)
 //
 // Usage examples:
-// @noise(0.05, 12345, 0.7) { ... }              // Sparse placement (30% of area)
-// @noise(0.02, 12345, 0, 16, 64) { ... }        // Terrain generation at y=64±16
-// @noise(0.1, 12345, 0.8, 16, 64) { ... }       // Trees on terrain (20% coverage)
-static void occurrence_noise(const double *args, size_t arg_count, const InstructionList *body, int origin_x, int origin_y, int origin_z,
+// @noise .frequency=0.05 .seed=12345 .threshold=0.7 { ... }              // Sparse placement (30% of area)
+// @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 { ... }    // Terrain generation at y=64±16
+// @noise .frequency=0.1 .seed=12345 .threshold=0.8 .amplitude=16 .base_y=64 { ... }  // Trees on terrain (20% coverage)
+static void occurrence_noise(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
     OccurrenceRuntime *runtime) {
-  if (!runtime || !runtime->run_body || !body || body->count == 0 || arg_count < 2) {
+  if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
     return;
   }
 
-  float frequency = (float)args[0];
-  int seed = (int)llround(args[1]);
-  float threshold = arg_count >= 3 ? (float)args[2] : -1.0f;
-  float amplitude = arg_count >= 4 ? (float)args[3] : 0.0f;
-  int base_y = arg_count >= 5 ? (int)llround(args[4]) : 0;
+  // Get named arguments
+  Expression *frequency_expr = named_arg_get(args, "frequency");
+  Expression *seed_expr = named_arg_get(args, "seed");
+  Expression *threshold_expr = named_arg_get(args, "threshold");
+  Expression *amplitude_expr = named_arg_get(args, "amplitude");
+  Expression *base_y_expr = named_arg_get(args, "base_y");
+
+  if (!frequency_expr || !seed_expr) {
+    return; // Missing required arguments
+  }
+
+  float frequency = (float)painter_evaluate_expression(frequency_expr, state);
+  int seed = (int)llround(painter_evaluate_expression(seed_expr, state));
+  float threshold = threshold_expr ? (float)painter_evaluate_expression(threshold_expr, state) : -1.0f;
+  float amplitude = amplitude_expr ? (float)painter_evaluate_expression(amplitude_expr, state) : 0.0f;
+  int base_y = base_y_expr ? (int)llround(painter_evaluate_expression(base_y_expr, state)) : 0;
 
   // Initialize noise
   fnl_state noise = fnlCreateState();

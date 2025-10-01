@@ -42,7 +42,7 @@ static inline void expression_list_reset(ExpressionList *list) {
   list->capacity = 0;
 }
 
-static inline void macro_argument_list_reset(MacroArgumentList *list) {
+static inline void named_argument_list_reset(NamedArgumentList *list) {
   list->items = NULL;
   list->count = 0;
   list->capacity = 0;
@@ -70,7 +70,7 @@ static bool expression_list_push(Parser *parser, ExpressionList *list, Expressio
   return true;
 }
 
-static bool macro_argument_list_push(Parser *parser, MacroArgumentList *list, MacroArgument argument) {
+static bool named_argument_list_push(Parser *parser, NamedArgumentList *list, NamedArgument argument) {
   if (!ensure_capacity(parser, (void **)&list->items, &list->capacity, list->count, sizeof(*list->items))) {
     return false;
   }
@@ -718,27 +718,33 @@ static IfStatement parse_if_statement(Parser *parser) {
 }
 
 static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
-  expression_list_reset(&occurrence->args);
+  named_argument_list_reset(&occurrence->args);
   occurrence->condition = NULL;
 
-  if (consume(TOKEN_LEFT_PAREN)) {
-    while (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
-      Expression *arg = parse_expression(parser);
-      if (!arg) {
-        return false;
-      }
-
-      if (!expression_list_push(parser, &occurrence->args, arg)) {
-        expression_free(arg);
-        return false;
-      }
-
-      if (!consume(TOKEN_COMMA)) {
-        break;
-      }
+  // Parse arguments (.name=value)
+  while (consume(TOKEN_DOT)) {
+    Token arg_name_token = peek();
+    if (arg_name_token.type != TOKEN_IDENTIFIER) {
+      parser_error(parser, "Expected argument name after '.'");
+      return false;
     }
 
-    if (!expect_token(parser, TOKEN_RIGHT_PAREN, "Expected ')' after occurrence arguments")) {
+    NamedArgument arg = {0};
+    strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+    arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    next();
+
+    if (!expect_token(parser, TOKEN_EQUAL, "Expected '=' after argument name")) {
+      return false;
+    }
+
+    arg.value = parse_expression(parser);
+    if (!arg.value) {
+      return false;
+    }
+
+    if (!named_argument_list_push(parser, &occurrence->args, arg)) {
+      expression_free(arg.value);
       return false;
     }
   }
@@ -787,7 +793,7 @@ static Occurrence parse_occurrence(Parser *parser) {
   occurrence.kind = OCCURRENCE_KIND_IMMEDIATE;
   occurrence.name[0] = '\0';
   occurrence.condition = NULL;
-  expression_list_reset(&occurrence.args);
+  named_argument_list_reset(&occurrence.args);
   instruction_list_reset(&occurrence.body);
 
   next(); // consume '@'
@@ -819,7 +825,7 @@ static Occurrence parse_occurrence_definition(Parser *parser, const char *name) 
   strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   occurrence.condition = NULL;
-  expression_list_reset(&occurrence.args);
+  named_argument_list_reset(&occurrence.args);
   instruction_list_reset(&occurrence.body);
 
   if (!consume(TOKEN_AT)) {
@@ -851,7 +857,7 @@ static Occurrence parse_occurrence_reference(Parser *parser, const char *name) {
   occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   occurrence.type[0] = '\0';
   occurrence.condition = NULL;
-  expression_list_reset(&occurrence.args);
+  named_argument_list_reset(&occurrence.args);
   instruction_list_reset(&occurrence.body);
 
   if (!parse_occurrence_body(parser, &occurrence)) {
@@ -951,7 +957,7 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
 
 static MacroCall parse_macro_call(Parser *parser) {
   MacroCall macro = {0};
-  macro_argument_list_reset(&macro.arguments);
+  named_argument_list_reset(&macro.arguments);
 
   // Consume '#'
   next();
@@ -975,7 +981,7 @@ static MacroCall parse_macro_call(Parser *parser) {
       return macro;
     }
 
-    MacroArgument arg = {0};
+    NamedArgument arg = {0};
     strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
     arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     next();
@@ -989,7 +995,7 @@ static MacroCall parse_macro_call(Parser *parser) {
       return macro;
     }
 
-    if (!macro_argument_list_push(parser, &macro.arguments, arg)) {
+    if (!named_argument_list_push(parser, &macro.arguments, arg)) {
       expression_free(arg.value);
       return macro;
     }
@@ -1147,6 +1153,61 @@ Program *parse_program(Parser *parser) {
   return program;
 }
 
+// Deep copy an expression
+static Expression *expression_copy(const Expression *expr) {
+  if (!expr) return NULL;
+
+  Expression *copy = malloc(sizeof(Expression));
+  if (!copy) return NULL;
+
+  copy->type = expr->type;
+
+  switch (expr->type) {
+  case EXPR_NUMBER: copy->number = expr->number; break;
+  case EXPR_IDENTIFIER: strncpy(copy->identifier, expr->identifier, MAX_TOKEN_VALUE_LENGTH); break;
+  case EXPR_BINARY_OP:
+    copy->binary.op = expr->binary.op;
+    copy->binary.left = expression_copy(expr->binary.left);
+    copy->binary.right = expression_copy(expr->binary.right);
+    if (!copy->binary.left || !copy->binary.right) {
+      expression_free(copy);
+      return NULL;
+    }
+    break;
+  case EXPR_UNARY_OP:
+    copy->unary.op = expr->unary.op;
+    copy->unary.operand = expression_copy(expr->unary.operand);
+    if (!copy->unary.operand) {
+      expression_free(copy);
+      return NULL;
+    }
+    break;
+  case EXPR_COORDINATE:
+    copy->coordinate.x = expression_copy(expr->coordinate.x);
+    copy->coordinate.y = expression_copy(expr->coordinate.y);
+    copy->coordinate.z = expression_copy(expr->coordinate.z);
+    if (!copy->coordinate.x || !copy->coordinate.y || !copy->coordinate.z) {
+      expression_free(copy);
+      return NULL;
+    }
+    break;
+  case EXPR_FUNCTION_CALL:
+    strncpy(copy->function_call.name, expr->function_call.name, MAX_TOKEN_VALUE_LENGTH);
+    expression_list_reset(&copy->function_call.args);
+    for (size_t i = 0; i < expr->function_call.args.count; i++) {
+      Expression *arg_copy = expression_copy(expr->function_call.args.items[i]);
+      if (!arg_copy || !expression_list_push(NULL, &copy->function_call.args, arg_copy)) {
+        expression_free(arg_copy);
+        expression_free(copy);
+        return NULL;
+      }
+    }
+    break;
+  }
+
+  return copy;
+}
+
 // Memory cleanup
 void expression_free(Expression *expr) {
   if (!expr) return;
@@ -1201,7 +1262,7 @@ void instruction_free(Instruction *instr) {
     break;
   case INSTR_OCCURRENCE:
     for (size_t i = 0; i < instr->occurrence.args.count; i++) {
-      expression_free(instr->occurrence.args.items[i]);
+      expression_free(instr->occurrence.args.items[i].value);
     }
     free(instr->occurrence.args.items);
     expression_free(instr->occurrence.condition);
@@ -1275,9 +1336,13 @@ void occurrence_registry_init(OccurrenceRegistry *registry) {
 
 static void occurrence_registry_entry_free(OccurrenceRegistryEntry *entry) {
   if (!entry) return;
-  free(entry->args);
-  entry->args = NULL;
-  entry->arg_count = 0;
+  for (size_t i = 0; i < entry->args.count; i++) {
+    expression_free(entry->args.items[i].value);
+  }
+  free(entry->args.items);
+  entry->args.items = NULL;
+  entry->args.count = 0;
+  entry->args.capacity = 0;
 }
 
 void occurrence_registry_free(OccurrenceRegistry *registry) {
@@ -1301,7 +1366,7 @@ OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry
   return NULL;
 }
 
-bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const double *args, size_t arg_count) {
+bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const NamedArgumentList *args) {
   if (!registry || !name || !type) {
     return false;
   }
@@ -1313,29 +1378,29 @@ bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, con
     }
 
     entry = &registry->entries[registry->entry_count++];
-    entry->args = NULL;
-    entry->arg_count = 0;
+    named_argument_list_reset(&entry->args);
     strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
     entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   } else {
     occurrence_registry_entry_free(entry);
+    named_argument_list_reset(&entry->args);
   }
 
   strncpy(entry->type, type, MAX_TOKEN_VALUE_LENGTH - 1);
   entry->type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  entry->arg_count = arg_count;
 
-  if (arg_count > 0) {
-    entry->args = malloc(sizeof(double) * arg_count);
-    if (!entry->args) {
-      entry->arg_count = 0;
-      return false;
+  // Deep copy the arguments
+  if (args && args->count > 0) {
+    for (size_t i = 0; i < args->count; i++) {
+      NamedArgument arg_copy = {0};
+      strncpy(arg_copy.name, args->items[i].name, MAX_TOKEN_VALUE_LENGTH - 1);
+      arg_copy.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+      arg_copy.value = expression_copy(args->items[i].value);
+      if (!arg_copy.value || !named_argument_list_push(NULL, &entry->args, arg_copy)) {
+        expression_free(arg_copy.value);
+        return false;
+      }
     }
-    for (size_t i = 0; i < arg_count; i++) {
-      entry->args[i] = args ? args[i] : 0.0;
-    }
-  } else {
-    entry->args = NULL;
   }
 
   return true;
@@ -1474,8 +1539,8 @@ double context_get(VariableContext *ctx, const char *name) {
   return 0.0;
 }
 
-// Helper function to get macro argument by name
-Expression *macro_get_arg(const MacroArgumentList *args, const char *name) {
+// Helper function to get named argument by name
+Expression *named_arg_get(const NamedArgumentList *args, const char *name) {
   if (!args) return NULL;
   for (size_t i = 0; i < args->count; i++) {
     if (strcmp(args->items[i].name, name) == 0) {
@@ -1787,9 +1852,7 @@ static void process_instruction(Instruction *instr, ExecutionState *state, int o
     break;
   }
 
-  case INSTR_PALETTE_DEFINITION:
-    apply_palette_definition(state, &instr->palette_definition);
-    break;
+  case INSTR_PALETTE_DEFINITION: apply_palette_definition(state, &instr->palette_definition); break;
   }
 }
 
@@ -1804,8 +1867,8 @@ static void occurrence_runtime_run_body(void *userdata, const InstructionList *b
   }
 }
 
-static void execute_occurrence_by_type(const char *type, const double *args, size_t arg_count, const InstructionList *body,
-    ExecutionState *state, int origin_x, int origin_y, int origin_z) {
+static void execute_occurrence_by_type(const char *type, const NamedArgumentList *args, const InstructionList *body, ExecutionState *state,
+    int origin_x, int origin_y, int origin_z) {
   if (!type || !state || !state->occurrence_types) {
     return;
   }
@@ -1823,7 +1886,7 @@ static void execute_occurrence_by_type(const char *type, const double *args, siz
       .userdata = state,
   };
 
-  generator(args, arg_count, body, origin_x, origin_y, origin_z, &runtime);
+  generator(state, args, body, origin_x, origin_y, origin_z, &runtime);
 }
 
 static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state, int origin_x, int origin_y, int origin_z) {
@@ -1831,20 +1894,7 @@ static void execute_occurrence_instruction(const Occurrence *occurrence, Executi
 
   switch (occurrence->kind) {
   case OCCURRENCE_KIND_DEFINITION: {
-    size_t arg_count = occurrence->args.count;
-    double *values = NULL;
-    if (arg_count > 0) {
-      values = malloc(sizeof(double) * arg_count);
-      if (!values) {
-        return;
-      }
-      for (size_t i = 0; i < arg_count; i++) {
-        values[i] = painter_evaluate_expression(occurrence->args.items[i], state);
-      }
-    }
-
-    occurrence_registry_set(state->occurrences, occurrence->name, occurrence->type, values, arg_count);
-    free(values);
+    occurrence_registry_set(state->occurrences, occurrence->name, occurrence->type, &occurrence->args);
     break;
   }
 
@@ -1853,25 +1903,12 @@ static void execute_occurrence_instruction(const Occurrence *occurrence, Executi
     if (!entry) {
       return;
     }
-    execute_occurrence_by_type(entry->type, entry->args, entry->arg_count, &occurrence->body, state, origin_x, origin_y, origin_z);
+    execute_occurrence_by_type(entry->type, &entry->args, &occurrence->body, state, origin_x, origin_y, origin_z);
     break;
   }
 
   case OCCURRENCE_KIND_IMMEDIATE: {
-    size_t arg_count = occurrence->args.count;
-    double *values = NULL;
-    if (arg_count > 0) {
-      values = malloc(sizeof(double) * arg_count);
-      if (!values) {
-        return;
-      }
-      for (size_t i = 0; i < arg_count; i++) {
-        values[i] = painter_evaluate_expression(occurrence->args.items[i], state);
-      }
-    }
-
-    execute_occurrence_by_type(occurrence->type, values, arg_count, &occurrence->body, state, origin_x, origin_y, origin_z);
-    free(values);
+    execute_occurrence_by_type(occurrence->type, &occurrence->args, &occurrence->body, state, origin_x, origin_y, origin_z);
     break;
   }
   }

@@ -192,7 +192,7 @@ class ParserTest {
     @DisplayName("Occurrence definition can be referenced")
     void testOccurrenceDefinitionAndReferenceParse() {
         assertParseSucceed("""
-                repeat = @every(0, 4, 0)
+                repeat = @every .x=0 .y=4 .z=0
                 repeat {
                   [0 0] oak_planks
                 }
@@ -203,7 +203,7 @@ class ParserTest {
     @DisplayName("@every occurrence places repeated blocks")
     void testEveryOccurrenceExecution() {
         String programSource = """
-                @every(0, 4, 0) {
+                @every .x=0 .y=4 .z=0 {
                   [0 0] oak_planks
                 }
                 """;
@@ -322,7 +322,7 @@ class ParserTest {
     void testNoiseTerrainOccurrence() {
         String program = """
                 // Terrain with amplitude and base_y
-                @noise(0.02, 12345, 0, 16, 64) {
+                @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 {
                   [0 0 0] grass_block
                   [0 -1 0] dirt
                 }
@@ -352,7 +352,7 @@ class ParserTest {
     void testNoiseThresholdOccurrence() {
         String program = """
                 // Sparse placement using threshold (only 30% of area)
-                @noise(0.05, 12345, 0.7) {
+                @noise .frequency=0.05 .seed=12345 .threshold=0.7 {
                   [0 0 0] oak_sapling
                 }
                 """;
@@ -376,7 +376,7 @@ class ParserTest {
     void testNoiseTreesOccurrence() {
         String program = """
                 // Trees on terrain: threshold for sparsity + amplitude for terrain following
-                @noise(0.1, 12345, 0.7, 16, 64) {
+                @noise .frequency=0.1 .seed=12345 .threshold=0.7 .amplitude=16 .base_y=64 {
                   [0 0 0] oak_log
                   [0 1 0] oak_log
                   [0 2 0] oak_log
@@ -421,13 +421,13 @@ class ParserTest {
     void testCombinedNoiseOccurrences() {
         String program = """
                 // Generate terrain (no threshold, just height variation)
-                @noise(0.025, 77777, 0, 20, 70) {
+                @noise .frequency=0.025 .seed=77777 .amplitude=20 .base_y=70 {
                   [0 0 0] grass_block
                   [0 -1 0] dirt
                 }
                 
                 // Add trees with threshold for sparsity, same terrain height
-                @noise(0.025, 77777, 0.75, 20, 70) {
+                @noise .frequency=0.025 .seed=77777 .threshold=0.75 .amplitude=20 .base_y=70 {
                   [0 1 0] oak_log
                   [0 2 0] oak_log
                   [0 3 0] oak_log

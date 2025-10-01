@@ -15,7 +15,7 @@ typedef struct Occurrence Occurrence;
 typedef struct PaletteDefinition PaletteDefinition;
 typedef struct PaletteEntry PaletteEntry;
 typedef struct MacroCall MacroCall;
-typedef struct MacroArgument MacroArgument;
+typedef struct NamedArgument NamedArgument;
 typedef struct FunctionRegistry FunctionRegistry;
 typedef struct FunctionRegistryEntry FunctionRegistryEntry;
 typedef struct ExecutionState ExecutionState;
@@ -44,10 +44,10 @@ typedef struct {
 } PaletteEntryList;
 
 typedef struct {
-  MacroArgument *items;
+  NamedArgument *items;
   size_t count;
   size_t capacity;
-} MacroArgumentList;
+} NamedArgumentList;
 
 // Expression types
 typedef enum {
@@ -131,19 +131,19 @@ typedef enum {
   OCCURRENCE_KIND_REFERENCE,
 } OccurrenceKind;
 
-// Occurrence: @type(args) [condition] { instructions }
+// Occurrence: @type .arg=value [condition] { instructions }
 typedef struct Occurrence {
   OccurrenceKind kind;
   char name[MAX_TOKEN_VALUE_LENGTH];
   char type[MAX_TOKEN_VALUE_LENGTH];
-  ExpressionList args;
+  NamedArgumentList args;
   Expression *condition; // optional
   InstructionList body;
 } Occurrence;
 
 typedef struct OccurrenceRuntime OccurrenceRuntime;
 
-typedef void (*OccurrenceGenerator)(const double *args, size_t arg_count, const InstructionList *body, int origin_x, int origin_y,
+typedef void (*OccurrenceGenerator)(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y,
     int origin_z, OccurrenceRuntime *runtime);
 
 struct OccurrenceRuntime {
@@ -167,16 +167,16 @@ typedef struct PaletteDefinition {
   PaletteEntryList entries;
 } PaletteDefinition;
 
-// Macro argument: .name=value
-typedef struct MacroArgument {
+// Named argument: .name=value
+typedef struct NamedArgument {
   char name[MAX_TOKEN_VALUE_LENGTH];
   Expression *value;
-} MacroArgument;
+} NamedArgument;
 
 // Macro call: #macro_name .arg1=val1 .arg2=val2
 typedef struct MacroCall {
   char name[MAX_TOKEN_VALUE_LENGTH];
-  MacroArgumentList arguments;
+  NamedArgumentList arguments;
 } MacroCall;
 
 // Conditional branch: if/elif with condition and body
@@ -255,8 +255,7 @@ struct VariableContext {
 typedef struct {
   char name[MAX_TOKEN_VALUE_LENGTH];
   char type[MAX_TOKEN_VALUE_LENGTH];
-  double *args;
-  size_t arg_count;
+  NamedArgumentList args;
 } OccurrenceRegistryEntry;
 
 struct OccurrenceRegistry {
@@ -312,7 +311,7 @@ struct ExecutionState {
 // Macro generator function type
 // Takes: execution state with variable context, macro arguments, function registry, and section info
 // Modifies block_indices array to place blocks
-typedef void (*MacroGenerator)(ExecutionState *state, const MacroArgumentList *args);
+typedef void (*MacroGenerator)(ExecutionState *state, const NamedArgumentList *args);
 
 // Macro registry entry
 typedef struct {
@@ -350,7 +349,7 @@ MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name);
 void occurrence_registry_init(OccurrenceRegistry *registry);
 void occurrence_registry_free(OccurrenceRegistry *registry);
 OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry, const char *name);
-bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const double *args, size_t arg_count);
+bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const NamedArgumentList *args);
 
 void occurrence_type_registry_init(OccurrenceTypeRegistry *registry);
 void occurrence_type_registry_free(OccurrenceTypeRegistry *registry);
@@ -370,8 +369,8 @@ void context_free(VariableContext *ctx);
 void context_set(VariableContext *ctx, const char *name, double value);
 double context_get(VariableContext *ctx, const char *name);
 
-// Helper function to get macro argument by name
-Expression *macro_get_arg(const MacroArgumentList *args, const char *name);
+// Helper function to get named argument by name
+Expression *named_arg_get(const NamedArgumentList *args, const char *name);
 
 // Expression evaluation helpers (exposed for macro implementations)
 double painter_evaluate_expression(const Expression *expr, ExecutionState *state);
