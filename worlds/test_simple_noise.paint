@@ -1,0 +1,4 @@
+// Simple noise terrain test
+@noise(0.02, 12345, 0, 16, 64) {
+  [0 0 0] grass_block
+}

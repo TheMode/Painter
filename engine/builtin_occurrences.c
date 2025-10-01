@@ -1,4 +1,6 @@
 #include "builtin_occurrences.h"
+#define FNL_IMPL
+#include "FastNoiseLite.h"
 
 #include <math.h>
 
@@ -66,8 +68,75 @@ static void occurrence_every(const double *args, size_t arg_count, const Instruc
   }
 }
 
+// @noise(frequency, seed, [threshold], [amplitude], [base_y])
+// General-purpose noise-based occurrence
+// - frequency: controls feature density/smoothness (e.g., 0.01-0.1)
+// - seed: random seed for reproducible patterns
+// - threshold: optional, if provided the body only executes if noise > threshold (0-1)
+// - amplitude: optional, if provided noise is multiplied and added to Y coordinate (for terrain height)
+// - base_y: optional, base Y level when using amplitude (default 0)
+//
+// Usage examples:
+// @noise(0.05, 12345, 0.7) { ... }              // Sparse placement (30% of area)
+// @noise(0.02, 12345, 0, 16, 64) { ... }        // Terrain generation at y=64±16
+// @noise(0.1, 12345, 0.8, 16, 64) { ... }       // Trees on terrain (20% coverage)
+static void occurrence_noise(const double *args, size_t arg_count, const InstructionList *body, int origin_x, int origin_y, int origin_z,
+    OccurrenceRuntime *runtime) {
+  if (!runtime || !runtime->run_body || !body || body->count == 0 || arg_count < 2) {
+    return;
+  }
+
+  float frequency = (float)args[0];
+  int seed = (int)llround(args[1]);
+  float threshold = arg_count >= 3 ? (float)args[2] : -1.0f;
+  float amplitude = arg_count >= 4 ? (float)args[3] : 0.0f;
+  int base_y = arg_count >= 5 ? (int)llround(args[4]) : 0;
+
+  // Initialize noise
+  fnl_state noise = fnlCreateState();
+  noise.seed = seed;
+  noise.frequency = frequency;
+  noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
+
+  const int SEARCH_MARGIN = 16;
+  int range_min_x = runtime->base_x - SEARCH_MARGIN;
+  int range_max_x = runtime->base_x + 15 + SEARCH_MARGIN;
+  int range_min_z = runtime->base_z - SEARCH_MARGIN;
+  int range_max_z = runtime->base_z + 15 + SEARCH_MARGIN;
+
+  // Sample noise for each XZ coordinate
+  for (int x = range_min_x; x <= range_max_x; x++) {
+    for (int z = range_min_z; z <= range_max_z; z++) {
+      float world_x = (float)(x + origin_x);
+      float world_z = (float)(z + origin_z);
+
+      // Get noise value (-1 to 1)
+      float noise_value = fnlGetNoise2D(&noise, world_x, world_z);
+
+      // Check threshold if provided (normalize to 0-1 for comparison)
+      if (threshold >= 0.0f) {
+        float normalized_noise = (noise_value + 1.0f) * 0.5f;
+        if (normalized_noise < threshold) {
+          continue; // Skip this position
+        }
+      }
+
+      // Calculate Y position
+      int y_position = origin_y;
+      if (amplitude != 0.0f) {
+        int height_offset = (int)roundf(noise_value * amplitude);
+        y_position = base_y + height_offset + origin_y;
+      }
+
+      // Run the body at this position
+      runtime->run_body(runtime->userdata, body, x + origin_x, y_position, z + origin_z);
+    }
+  }
+}
+
 const BuiltinOccurrence BUILTIN_OCCURRENCES[] = {
     {"every", occurrence_every},
+    {"noise", occurrence_noise},
 };
 
 const size_t BUILTIN_OCCURRENCE_COUNT = sizeof(BUILTIN_OCCURRENCES) / sizeof(BuiltinOccurrence);

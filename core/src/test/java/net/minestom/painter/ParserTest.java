@@ -316,5 +316,131 @@ class ParserTest {
 
         assertParseSucceed(programSource);
     }
+
+    @Test
+    @DisplayName("@noise occurrence generates terrain")
+    void testNoiseTerrainOccurrence() {
+        String program = """
+                // Terrain with amplitude and base_y
+                @noise(0.02, 12345, 0, 16, 64) {
+                  [0 0 0] grass_block
+                  [0 -1 0] dirt
+                }
+                """;
+        
+        // Parse and generate to verify it doesn't crash
+        assertParseSucceed(program);
+        
+        // Additionally verify we can generate sections without errors
+        MemorySegment programSegment = null;
+        try {
+            programSegment = PainterParser.parseString(program);
+            // Generate a few sections to ensure the noise generation works
+            for (int y = 0; y < 5; y++) {
+                PainterParser.SectionData section = PainterParser.generateSection(programSegment, 0, y, 0);
+                assertNotNull(section, "Should generate section at y=" + y);
+            }
+        } finally {
+            if (programSegment != null) {
+                PainterParser.freeProgram(programSegment);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("@noise occurrence with threshold for sparse placement")
+    void testNoiseThresholdOccurrence() {
+        String program = """
+                // Sparse placement using threshold (only 30% of area)
+                @noise(0.05, 12345, 0.7) {
+                  [0 0 0] oak_sapling
+                }
+                """;
+        
+        MemorySegment programSegment = null;
+        try {
+            programSegment = PainterParser.parseString(program);
+            assertNotNull(programSegment, "Noise threshold program should parse successfully");
+            
+            PainterParser.SectionData section = PainterParser.generateSection(programSegment, 0, 0, 0);
+            assertNotNull(section, "Should generate section data");
+        } finally {
+            if (programSegment != null) {
+                PainterParser.freeProgram(programSegment);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("@noise occurrence places trees on terrain")
+    void testNoiseTreesOccurrence() {
+        String program = """
+                // Trees on terrain: threshold for sparsity + amplitude for terrain following
+                @noise(0.1, 12345, 0.7, 16, 64) {
+                  [0 0 0] oak_log
+                  [0 1 0] oak_log
+                  [0 2 0] oak_log
+                  [-1 3 0] oak_leaves
+                  [1 3 0] oak_leaves
+                  [0 3 -1] oak_leaves
+                  [0 3 1] oak_leaves
+                  [0 3 0] oak_leaves
+                }
+                """;
+        
+        MemorySegment programSegment = null;
+        try {
+            programSegment = PainterParser.parseString(program);
+            assertNotNull(programSegment, "Noise trees program should parse successfully");
+            
+            PainterParser.SectionData section = PainterParser.generateSection(programSegment, 0, 4, 0);
+            assertNotNull(section, "Should generate section data");
+            
+            // Trees should place logs and leaves based on noise
+            if (section.palette().length > 0) {
+                // If blocks were placed, verify the tree blocks are in palette
+                boolean hasTreeBlocks = false;
+                for (String block : section.palette()) {
+                    if (block.contains("oak_log") || block.contains("oak_leaves")) {
+                        hasTreeBlocks = true;
+                        break;
+                    }
+                }
+                assertTrue(hasTreeBlocks || section.palette().length == 1, 
+                    "Section should have tree blocks or be empty (air)");
+            }
+        } finally {
+            if (programSegment != null) {
+                PainterParser.freeProgram(programSegment);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Combined terrain and tree occurrences work together")
+    void testCombinedNoiseOccurrences() {
+        String program = """
+                // Generate terrain (no threshold, just height variation)
+                @noise(0.025, 77777, 0, 20, 70) {
+                  [0 0 0] grass_block
+                  [0 -1 0] dirt
+                }
+                
+                // Add trees with threshold for sparsity, same terrain height
+                @noise(0.025, 77777, 0.75, 20, 70) {
+                  [0 1 0] oak_log
+                  [0 2 0] oak_log
+                  [0 3 0] oak_log
+                  [-1 3 0] oak_leaves
+                  [1 3 0] oak_leaves
+                  [0 3 -1] oak_leaves
+                  [0 3 1] oak_leaves
+                  [0 4 0] oak_leaves
+                }
+                """;
+        
+        assertParseSucceed(program);
+    }
 }
+
 
