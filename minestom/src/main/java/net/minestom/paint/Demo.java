@@ -49,7 +49,7 @@ public final class Demo {
         logger.info("Created waiting instance for reload safety");
 
         // Load the initial painter program
-        Path paintFile = Path.of("worlds", "test_noise3d_spheres.paint");
+        Path paintFile = Path.of("worlds", "one_block.paint");
         final String program = Files.readString(paintFile);
 
         // Load the initial generator

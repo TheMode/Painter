@@ -1549,11 +1549,12 @@ Expression *named_arg_get(const NamedArgumentList *args, const char *name) {
 }
 
 static int calculate_bits_per_entry(int palette_size) {
-  if (palette_size <= 1) return 0;
+  static int const MIN_BITS = 4;
+  if (palette_size <= 1) return MIN_BITS;
   unsigned x = (unsigned)(palette_size - 1);
 
 #if defined(__GNUC__) || defined(__clang__)
-  return sizeof(unsigned) * CHAR_BIT - __builtin_clz(x);
+  int bits = sizeof(unsigned) * CHAR_BIT - __builtin_clz(x);
 #else
   int bits = 1;
   if (x >= 1u << 16) {
@@ -1573,8 +1574,8 @@ static int calculate_bits_per_entry(int palette_size) {
     x >>= 2;
   }
   if (x >= 1u << 1) bits++;
-  return bits;
 #endif
+  return bits < MIN_BITS ? MIN_BITS : bits;
 }
 
 static bool ensure_runtime_palette_capacity(ExecutionState *state, size_t required_capacity) {

@@ -5,7 +5,7 @@ import net.minestom.server.coordinate.Vec;
 import net.minestom.server.instance.block.Block;
 import net.minestom.server.instance.generator.GenerationUnit;
 import net.minestom.server.instance.generator.Generator;
-import net.minestom.server.instance.palette.Palettes;
+import net.minestom.server.instance.palette.Palette;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.lang.foreign.MemorySegment;
@@ -55,21 +55,17 @@ public final class PaintGenerator implements Generator {
                 blockStateIds[i] = block.stateId();
             }
 
-            for (int x = 0; x < 16; x++) {
-                for (int y = 0; y < 16; y++) {
-                    for (int z = 0; z < 16; z++) {
-                        int value = Palettes.read(16, bitsPerEntry, data, x, y, z);
-                        final int index = blockStateIds[value];
-                        Block block = Block.fromStateId(index);
-                        assert block != null;
+            Palette blocks = Palette.blocks(bitsPerEntry);
+            blocks.load(blockStateIds, data);
 
-                        final int globalX = x + sectionX * SECTION_SIZE;
-                        final int globalY = y + sectionY * SECTION_SIZE;
-                        final int globalZ = z + sectionZ * SECTION_SIZE;
-                        unit.modifier().setBlock(globalX, globalY, globalZ, block);
-                    }
-                }
-            }
+            blocks.getAllPresent((x, y, z, value) -> {
+                final Block block = Block.fromStateId(value);
+                assert block != null;
+                final int globalX = x + sectionX * SECTION_SIZE;
+                final int globalY = y + sectionY * SECTION_SIZE;
+                final int globalZ = z + sectionZ * SECTION_SIZE;
+                unit.modifier().setBlock(globalX, globalY, globalZ, block);
+            });
         }
     }
 
