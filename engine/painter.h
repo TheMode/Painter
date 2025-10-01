@@ -16,6 +16,8 @@ typedef struct PaletteDefinition PaletteDefinition;
 typedef struct PaletteEntry PaletteEntry;
 typedef struct MacroCall MacroCall;
 typedef struct MacroArgument MacroArgument;
+typedef struct FunctionRegistry FunctionRegistry;
+typedef struct FunctionRegistryEntry FunctionRegistryEntry;
 
 // Generic pointer-backed containers used throughout the parser/executor
 typedef struct {
@@ -207,10 +209,28 @@ typedef struct VariableContext {
   size_t variable_capacity;
 } VariableContext;
 
+// Built-in function signature (returns a double result for evaluated arguments)
+typedef double (*BuiltinFunction)(const double *args, size_t arg_count);
+
+// Function registry entry (tracks argument bounds for validation)
+struct FunctionRegistryEntry {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  size_t min_args;
+  size_t max_args;
+  BuiltinFunction function;
+};
+
+struct FunctionRegistry {
+  FunctionRegistryEntry *entries;
+  size_t entry_count;
+  size_t entry_capacity;
+};
+
 // Macro generator function type
 // Takes: variable context, macro arguments, argument count, section info, block_indices, palette info
 // Modifies block_indices array to place blocks
 typedef void (*MacroGenerator)(VariableContext *ctx, const MacroArgumentList *args,
+                               FunctionRegistry *function_registry,
                                int base_x, int base_y, int base_z,
                                int *block_indices, char ***palette, 
                                int *palette_size, int *palette_capacity);
@@ -248,6 +268,15 @@ void macro_registry_register(MacroRegistry *registry, const char *name, MacroGen
 MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name);
 void macro_registry_free(MacroRegistry *registry);
 
+// Function registry API
+void function_registry_init(FunctionRegistry *registry);
+bool function_registry_register(FunctionRegistry *registry, const char *name,
+                                size_t min_args, size_t max_args,
+                                BuiltinFunction function);
+const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry,
+                                                      const char *name);
+void function_registry_free(FunctionRegistry *registry);
+
 // Variable context API
 void context_init(VariableContext *ctx);
 void context_free(VariableContext *ctx);
@@ -258,7 +287,8 @@ double context_get(VariableContext *ctx, const char *name);
 Expression *macro_get_arg(const MacroArgumentList *args, const char *name);
 
 // Expression evaluation helpers (exposed for macro implementations)
-double painter_evaluate_expression(const Expression *expr, VariableContext *ctx);
+double painter_evaluate_expression(const Expression *expr, VariableContext *ctx,
+                                   FunctionRegistry *function_registry);
 
 // Palette helpers shared between the interpreter and macros
 int painter_palette_get_or_add(char ***palette, int *palette_size, int *palette_capacity,

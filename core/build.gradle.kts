@@ -58,7 +58,8 @@ tasks.register<Exec>("compileNativeLib") {
             "-O2",
             "-I${engineDir.absolutePath}",
             "-o", outputLib.absolutePath,
-            *cSources.files.map { it.absolutePath }.toTypedArray()
+            *cSources.files.map { it.absolutePath }.toTypedArray(),
+            "-lm"
         )
     }
 }

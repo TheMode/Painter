@@ -2,6 +2,7 @@
 // Sphere macro: #sphere .x=<x> .y=<y> .z=<z> .radius=<radius> .block=<block_name>
 // Generates a filled 3D sphere
 void builtin_macro_sphere(VariableContext *ctx, const MacroArgumentList *args,
+                         FunctionRegistry *function_registry,
                          int base_x, int base_y, int base_z,
                          int *block_indices, char ***palette, 
                          int *palette_size, int *palette_capacity) {
@@ -16,10 +17,10 @@ void builtin_macro_sphere(VariableContext *ctx, const MacroArgumentList *args,
     return; // Missing required arguments
   }
   
-  int center_x = x_expr ? (int)painter_evaluate_expression(x_expr, ctx) : 0;
-  int center_y = y_expr ? (int)painter_evaluate_expression(y_expr, ctx) : 0;
-  int center_z = z_expr ? (int)painter_evaluate_expression(z_expr, ctx) : 0;
-  int radius = (int)painter_evaluate_expression(radius_expr, ctx);
+  int center_x = x_expr ? (int)painter_evaluate_expression(x_expr, ctx, function_registry) : 0;
+  int center_y = y_expr ? (int)painter_evaluate_expression(y_expr, ctx, function_registry) : 0;
+  int center_z = z_expr ? (int)painter_evaluate_expression(z_expr, ctx, function_registry) : 0;
+  int radius = (int)painter_evaluate_expression(radius_expr, ctx, function_registry);
   
   // Get block name (must be an identifier)
   if (block_expr->type != EXPR_IDENTIFIER) {

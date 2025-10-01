@@ -1,8 +1,10 @@
 #include "painter.h"
 #include "builtin_macros.h"
+#include "builtin_functions.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 
 // -----------------------------------------------------------------------------
 // Internal utility helpers
@@ -1044,6 +1046,56 @@ void macro_registry_free(MacroRegistry *registry) {
   registry->entry_capacity = 0;
 }
 
+// Function registry implementation
+void function_registry_init(FunctionRegistry *registry) {
+  registry->entries = NULL;
+  registry->entry_count = 0;
+  registry->entry_capacity = 0;
+}
+
+bool function_registry_register(FunctionRegistry *registry, const char *name,
+                                size_t min_args, size_t max_args,
+                                BuiltinFunction function) {
+  if (!registry || !name || !function) {
+    return false;
+  }
+
+  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
+                       registry->entry_count, sizeof(*registry->entries))) {
+    return false;
+  }
+
+  FunctionRegistryEntry *entry = &registry->entries[registry->entry_count++];
+  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  entry->min_args = min_args;
+  entry->max_args = max_args;
+  entry->function = function;
+  return true;
+}
+
+const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry,
+                                                      const char *name) {
+  if (!registry || !name) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < registry->entry_count; i++) {
+    if (strcmp(registry->entries[i].name, name) == 0) {
+      return &registry->entries[i];
+    }
+  }
+  return NULL;
+}
+
+void function_registry_free(FunctionRegistry *registry) {
+  if (!registry) return;
+  free(registry->entries);
+  registry->entries = NULL;
+  registry->entry_capacity = 0;
+  registry->entry_count = 0;
+}
+
 // Variable context implementation (moving from static to exported)
 void context_init(VariableContext *ctx) {
   ctx->variables = NULL;
@@ -1158,7 +1210,8 @@ void painter_format_block(char *buffer, size_t buffer_size, const char *block_na
 }
 
 // Helper function to evaluate an expression to a number
-double painter_evaluate_expression(const Expression *expr, VariableContext *ctx) {
+double painter_evaluate_expression(const Expression *expr, VariableContext *ctx,
+                                   FunctionRegistry *function_registry) {
   if (!expr) return 0.0;
 
   switch (expr->type) {
@@ -1167,8 +1220,8 @@ double painter_evaluate_expression(const Expression *expr, VariableContext *ctx)
     case EXPR_IDENTIFIER:
       return context_get(ctx, expr->identifier);
     case EXPR_BINARY_OP: {
-      double left = painter_evaluate_expression(expr->binary.left, ctx);
-      double right = painter_evaluate_expression(expr->binary.right, ctx);
+      double left = painter_evaluate_expression(expr->binary.left, ctx, function_registry);
+      double right = painter_evaluate_expression(expr->binary.right, ctx, function_registry);
       switch (expr->binary.op) {
         case OP_ADD: return left + right;
         case OP_SUBTRACT: return left - right;
@@ -1185,14 +1238,48 @@ double painter_evaluate_expression(const Expression *expr, VariableContext *ctx)
       break;
     }
     case EXPR_UNARY_OP: {
-      double operand = painter_evaluate_expression(expr->unary.operand, ctx);
+      double operand = painter_evaluate_expression(expr->unary.operand, ctx, function_registry);
       switch (expr->unary.op) {
         case OP_NEGATE: return -operand;
       }
       break;
     }
+    case EXPR_FUNCTION_CALL: {
+      if (!function_registry) {
+        return 0.0;
+      }
+
+      const FunctionRegistryEntry *entry =
+          function_registry_lookup(function_registry, expr->function_call.name);
+      if (!entry) {
+        return 0.0;
+      }
+
+      size_t arg_count = expr->function_call.args.count;
+      if (arg_count < entry->min_args) {
+        return 0.0;
+      }
+      if (entry->max_args != SIZE_MAX && arg_count > entry->max_args) {
+        return 0.0;
+      }
+
+      double *arg_values = NULL;
+      if (arg_count > 0) {
+        arg_values = malloc(sizeof(double) * arg_count);
+        if (!arg_values) {
+          return 0.0;
+        }
+        for (size_t i = 0; i < arg_count; i++) {
+          arg_values[i] = painter_evaluate_expression(expr->function_call.args.items[i],
+                                                      ctx, function_registry);
+        }
+      }
+
+      double result = entry->function ? entry->function(arg_values, arg_count) : 0.0;
+      free(arg_values);
+      return result;
+    }
     case EXPR_COORDINATE:
-    case EXPR_FUNCTION_CALL:
       break;
   }
 
@@ -1200,8 +1287,9 @@ double painter_evaluate_expression(const Expression *expr, VariableContext *ctx)
 }
 
 // Forward declaration for recursive processing
-static void process_instruction(Instruction *instr, VariableContext *ctx, 
+static void process_instruction(Instruction *instr, VariableContext *ctx,
                                 MacroRegistry *macro_registry,
+                                FunctionRegistry *function_registry,
                                 int base_x, int base_y, int base_z,
                                 int *block_indices, char ***palette, 
                                 int *palette_size, int *palette_capacity);
@@ -1210,6 +1298,7 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
 // Process a single instruction and its effects on the section
 static void process_instruction(Instruction *instr, VariableContext *ctx,
                                 MacroRegistry *macro_registry,
+                                FunctionRegistry *function_registry,
                                 int base_x, int base_y, int base_z,
                                 int *block_indices, char ***palette,
                                 int *palette_size, int *palette_capacity) {
@@ -1221,10 +1310,13 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
       
       if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
         // Evaluate coordinates
-        int x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, ctx);
+        int x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, ctx,
+                                                 function_registry);
         int y = placement->coordinate->coordinate.y ? 
-                (int)painter_evaluate_expression(placement->coordinate->coordinate.y, ctx) : 0;
-        int z = (int)painter_evaluate_expression(placement->coordinate->coordinate.z, ctx);
+                (int)painter_evaluate_expression(placement->coordinate->coordinate.y, ctx,
+                                                  function_registry) : 0;
+        int z = (int)painter_evaluate_expression(placement->coordinate->coordinate.z, ctx,
+                                                 function_registry);
         
         // Check if block is within this section
         if (x >= base_x && x < base_x + 16 &&
@@ -1260,7 +1352,7 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
     
     case INSTR_ASSIGNMENT: {
       Assignment *assignment = &instr->assignment;
-      double value = painter_evaluate_expression(assignment->value, ctx);
+      double value = painter_evaluate_expression(assignment->value, ctx, function_registry);
       context_set(ctx, assignment->name, value);
       break;
     }
@@ -1269,8 +1361,8 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
       ForLoop *loop = &instr->for_loop;
       
       // Evaluate loop bounds
-      int start = (int)painter_evaluate_expression(loop->start, ctx);
-      int end = (int)painter_evaluate_expression(loop->end, ctx);
+      int start = (int)painter_evaluate_expression(loop->start, ctx, function_registry);
+      int end = (int)painter_evaluate_expression(loop->end, ctx, function_registry);
       
       // Execute loop body for each iteration
       for (int i = start; i < end; i++) {
@@ -1279,8 +1371,9 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
         
         // Process all body instructions
         for (size_t j = 0; j < loop->body.count; j++) {
-          process_instruction(loop->body.items[j], ctx, macro_registry, base_x, base_y, base_z,
-                            block_indices, palette, palette_size, palette_capacity);
+          process_instruction(loop->body.items[j], ctx, macro_registry, function_registry,
+                              base_x, base_y, base_z,
+                              block_indices, palette, palette_size, palette_capacity);
         }
       }
       break;
@@ -1293,9 +1386,9 @@ static void process_instruction(Instruction *instr, VariableContext *ctx,
       MacroGenerator generator = macro_registry_lookup(macro_registry, macro_call->name);
       if (generator) {
         // Execute the macro
-        generator(ctx, &macro_call->arguments,
-                 base_x, base_y, base_z, block_indices, palette, 
-                 palette_size, palette_capacity);
+        generator(ctx, &macro_call->arguments, function_registry,
+                  base_x, base_y, base_z, block_indices, palette, 
+                  palette_size, palette_capacity);
       }
       break;
     }
@@ -1339,14 +1432,17 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   VariableContext ctx;
   context_init(&ctx);
   
-  // Initialize and register built-in macros
+  // Initialize and register built-in functionality
   MacroRegistry macro_registry;
   macro_registry_init(&macro_registry);
   register_builtin_macros(&macro_registry);
+  FunctionRegistry function_registry;
+  function_registry_init(&function_registry);
+  register_builtin_functions(&function_registry);
   
   // Process all instructions
   for (int i = 0; i < program->instruction_count; i++) {
-    process_instruction(program->instructions[i], &ctx, &macro_registry,
+    process_instruction(program->instructions[i], &ctx, &macro_registry, &function_registry,
                        base_x, base_y, base_z,
                        block_indices, &section->palette, 
                        &section->palette_size, &palette_capacity);
@@ -1355,6 +1451,7 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   // Clean up
   context_free(&ctx);
   macro_registry_free(&macro_registry);
+  function_registry_free(&function_registry);
   
   // Calculate bits per entry
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);

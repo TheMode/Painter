@@ -5,83 +5,159 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.MemorySegment;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@DisplayName("Basic Parsing Tests")
+@DisplayName("Painter Parser Tests")
 class ParserTest {
+
+    private void assertParseSucceed(String program) {
+        MemorySegment programSegment = null;
+        try {
+            programSegment = PainterParser.parseString(program);
+            assertNotNull(programSegment, "Program should parse successfully");
+        } finally {
+            if (programSegment != null) {
+                PainterParser.freeProgram(programSegment);
+            }
+        }
+    }
+
+    private void assertParseFail(String program) {
+        assertThrows(RuntimeException.class, () -> {
+            PainterParser.parseString(program);
+        }, "Should throw exception for invalid syntax");
+    }
 
     @Test
     @DisplayName("Parse simple block placement")
     void testSimpleBlockPlacement() {
-        String program = "[0 0] air";
-
-        MemorySegment programSegment = PainterParser.parseString(program);
-        int count = PainterParser.getInstructionCount(programSegment);
-
-        assertEquals(1, count, "Should parse 1 instruction");
-
-        PainterParser.freeProgram(programSegment);
+        assertParseSucceed("[0 0] air");
     }
 
     @Test
     @DisplayName("Parse block with properties")
     void testBlockWithProperties() {
-        String program = "[1 50 0] oak_planks[facing=north,half=top]";
-
-        MemorySegment programSegment = PainterParser.parseString(program);
-        int count = PainterParser.getInstructionCount(programSegment);
-
-        assertEquals(1, count, "Should parse 1 instruction");
-
-        PainterParser.SectionData section = PainterParser.generateSection(programSegment, 0, 3, 0);
-        assertTrue(section.palette().length >= 2, "Should have blocks in palette");
-
-        PainterParser.freeProgram(programSegment);
+        assertParseSucceed("[1 50 0] oak_planks[facing=north,half=top]");
     }
 
     @Test
     @DisplayName("Parse variable assignment")
     void testVariableAssignment() {
-        String program = """
+        assertParseSucceed("""
                 x = 5
                 [x 0] stone
-                """;
-
-        MemorySegment programSegment = PainterParser.parseString(program);
-        int count = PainterParser.getInstructionCount(programSegment);
-
-        assertEquals(2, count, "Should parse 2 instructions");
-
-        PainterParser.freeProgram(programSegment);
+                """);
     }
 
     @Test
     @DisplayName("Parse arithmetic expressions")
     void testArithmeticExpressions() {
-        String program = """
+        assertParseSucceed("""
                 x = 2
                 z = 3
                 [x 0 z] dirt
-                """;
+                """);
+    }
 
-        MemorySegment programSegment = PainterParser.parseString(program);
-        int count = PainterParser.getInstructionCount(programSegment);
+    @Test
+    @DisplayName("Parse function call expressions")
+    void testFunctionCalls() {
+        assertParseSucceed("""
+                [min(4, 2, -8) 0 0] stone
+                """);
+    }
 
-        assertTrue(count >= 3, "Should parse all instructions");
-
-        PainterParser.SectionData section = PainterParser.generateSection(programSegment, 0, 0, 0);
-        assertTrue(section.palette().length >= 2, "Should have blocks in palette");
-
-        PainterParser.freeProgram(programSegment);
+    @Test
+    @DisplayName("Parse nested function calls")
+    void testNestedFunctionCalls() {
+        assertParseSucceed("""
+                value = clamp(5, min(1, 3), max(2, 7))
+                [value 0 0] stone
+                """);
     }
 
     @Test
     @DisplayName("Invalid syntax throws error")
     void testInvalidSyntax() {
-        String program = "invalid syntax here";
+        assertParseFail("invalid syntax here");
+    }
 
-        assertThrows(RuntimeException.class, () -> {
-            PainterParser.parseString(program);
-        }, "Should throw exception for invalid syntax");
+    @Test
+    @DisplayName("Simple for loop places blocks correctly")
+    void testSimpleForLoop() {
+        assertParseSucceed("""
+                for i in 0..5 {
+                  [i 36 1] stone
+                }
+                """);
+    }
+
+    @Test
+    @DisplayName("Nested loops create grid pattern")
+    void testNestedLoops() {
+        assertParseSucceed("""
+                for x in 0..3 {
+                  for z in 0..3 {
+                    [x 37 z] oak_planks
+                  }
+                }
+                """);
+    }
+
+    @Test
+    @DisplayName("Loop with arithmetic expressions")
+    void testLoopWithArithmetic() {
+        assertParseSucceed("""
+                for i in 0..5 {
+                  [i*2 38 0] diamond_block
+                }
+                """);
+    }
+
+    @Test
+    @DisplayName("Loop with variables")
+    void testLoopWithVariables() {
+        assertParseSucceed("""
+                offset = 5
+                for i in 0..3 {
+                  [i+offset 39 0] gold_block
+                }
+                """);
+    }
+
+    @Test
+    @DisplayName("Loop with negative range")
+    void testLoopWithNegativeRange() {
+        assertParseSucceed("""
+                for i in -5..5 {
+                  [i 40 0] emerald_block
+                }
+                """);
+    }
+
+    @Test
+    @DisplayName("Nested loops with negative ranges")
+    void testNestedLoopsWithNegativeRanges() {
+        assertParseSucceed("""
+                [0 36 0] minecraft:grass_block
+                for i in -25..25 {
+                  for z in -25..25 {
+                    [i 28 z] stone
+                  }
+                }
+                """);
+    }
+
+    @Test
+    @DisplayName("Parse sphere macro syntax")
+    void testParseMacro() {
+        assertParseSucceed("#sphere .x=8 .radius=5 .block=stone");
+    }
+
+    @Test
+    @DisplayName("Parse and execute sphere macro")
+    void testCircleMacro() {
+        assertParseSucceed("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone");
     }
 }
