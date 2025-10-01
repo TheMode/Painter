@@ -119,13 +119,38 @@ typedef struct ForLoop {
   InstructionList body;
 } ForLoop;
 
+// Occurrence instruction kinds
+typedef enum {
+  OCCURRENCE_KIND_IMMEDIATE,
+  OCCURRENCE_KIND_DEFINITION,
+  OCCURRENCE_KIND_REFERENCE,
+} OccurrenceKind;
+
 // Occurrence: @type(args) [condition] { instructions }
 typedef struct Occurrence {
+  OccurrenceKind kind;
+  char name[MAX_TOKEN_VALUE_LENGTH];
   char type[MAX_TOKEN_VALUE_LENGTH];
   ExpressionList args;
   Expression *condition; // optional
   InstructionList body;
 } Occurrence;
+
+typedef struct OccurrenceRuntime OccurrenceRuntime;
+
+typedef void (*OccurrenceGenerator)(const double *args, size_t arg_count,
+                                    const InstructionList *body,
+                                    int origin_x, int origin_y, int origin_z,
+                                    OccurrenceRuntime *runtime);
+
+struct OccurrenceRuntime {
+  int base_x;
+  int base_y;
+  int base_z;
+  void (*run_body)(void *userdata, const InstructionList *body,
+                   int anchor_x, int anchor_y, int anchor_z);
+  void *userdata;
+};
 
 // Palette entry: key: block_name[properties]
 typedef struct PaletteEntry {
@@ -209,6 +234,31 @@ typedef struct VariableContext {
   size_t variable_capacity;
 } VariableContext;
 
+// Occurrence registry entry used at execution time
+typedef struct {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  char type[MAX_TOKEN_VALUE_LENGTH];
+  double *args;
+  size_t arg_count;
+} OccurrenceRegistryEntry;
+
+typedef struct {
+  OccurrenceRegistryEntry *entries;
+  size_t entry_count;
+  size_t entry_capacity;
+} OccurrenceRegistry;
+
+typedef struct {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  OccurrenceGenerator generator;
+} OccurrenceTypeRegistryEntry;
+
+typedef struct {
+  OccurrenceTypeRegistryEntry *entries;
+  size_t entry_count;
+  size_t entry_capacity;
+} OccurrenceTypeRegistry;
+
 // Built-in function signature (returns a double result for evaluated arguments)
 typedef double (*BuiltinFunction)(const double *args, size_t arg_count);
 
@@ -266,6 +316,19 @@ void instruction_free(Instruction *instr);
 void macro_registry_init(MacroRegistry *registry);
 void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator);
 MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name);
+
+// Occurrence registry helpers
+void occurrence_registry_init(OccurrenceRegistry *registry);
+void occurrence_registry_free(OccurrenceRegistry *registry);
+OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry, const char *name);
+bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type,
+                             const double *args, size_t arg_count);
+
+void occurrence_type_registry_init(OccurrenceTypeRegistry *registry);
+void occurrence_type_registry_free(OccurrenceTypeRegistry *registry);
+void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name,
+                                       OccurrenceGenerator generator);
+OccurrenceGenerator occurrence_type_registry_lookup(OccurrenceTypeRegistry *registry, const char *name);
 void macro_registry_free(MacroRegistry *registry);
 
 // Function registry API

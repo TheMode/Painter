@@ -35,6 +35,18 @@ for i in 0..5 {
 // Occurrences can be nested, for example to place trees in every section of a chunk
 // Note that occurrences are evaluated in order, so later occurrences can overwrite blocks placed by earlier ones
 // Syntax: `@<occurrence_type>(<parameters>) [<condition>] { <blocks> }`
+
+repeat = @every(0, 4, 0)
+repeat {
+  [0 0] oak_planks[facing=north,half=top,waterlogged=true]
+  [1 0] oak_planks[facing=south,half=bottom,waterlogged=false]
+}
+// Or:
+@every(0, 4, 0) {
+  [0 0] oak_planks[facing=north,half=top,waterlogged=true]
+  [1 0] oak_planks[facing=south,half=bottom,waterlogged=false]
+}
+
 tree = @noise(0.1, 0.5) > 0.3
 tree {
   [8 0] oak_log

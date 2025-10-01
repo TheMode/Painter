@@ -5,8 +5,10 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.MemorySegment;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("Painter Parser Tests")
 class ParserTest {
@@ -24,9 +26,34 @@ class ParserTest {
     }
 
     private void assertParseFail(String program) {
-        assertThrows(RuntimeException.class, () -> {
-            PainterParser.parseString(program);
-        }, "Should throw exception for invalid syntax");
+        assertThrows(RuntimeException.class, () -> PainterParser.parseString(program),
+                "Should throw exception for invalid syntax");
+    }
+
+    private static int findPaletteIndex(PainterParser.SectionData section, String blockId) {
+        String[] palette = section.palette();
+        for (int i = 0; i < palette.length; i++) {
+            if (palette[i].equals(blockId)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int getBlockIndex(PainterParser.SectionData section, int x, int y, int z) {
+        int bits = section.bitsPerEntry();
+        if (bits == 0) {
+            return 0;
+        }
+
+        int index = y * 256 + z * 16 + x;
+        int blocksPerLong = 64 / bits;
+        int longIndex = index / blocksPerLong;
+        int offset = (index % blocksPerLong) * bits;
+
+        long mask = (1L << bits) - 1;
+        long value = section.data()[longIndex];
+        return (int) ((value >>> offset) & mask);
     }
 
     @Test
@@ -159,5 +186,48 @@ class ParserTest {
     @DisplayName("Parse and execute sphere macro")
     void testCircleMacro() {
         assertParseSucceed("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone");
+    }
+
+    @Test
+    @DisplayName("Occurrence definition can be referenced")
+    void testOccurrenceDefinitionAndReferenceParse() {
+        assertParseSucceed("""
+                repeat = @every(0, 4, 0)
+                repeat {
+                  [0 0] oak_planks
+                }
+                """);
+    }
+
+    @Test
+    @DisplayName("@every occurrence places repeated blocks")
+    void testEveryOccurrenceExecution() {
+        String programSource = """
+                @every(0, 4, 0) {
+                  [0 0] oak_planks
+                }
+                """;
+
+        MemorySegment program = null;
+        try {
+            program = PainterParser.parseString(programSource);
+            PainterParser.SectionData section = PainterParser.generateSection(program, 0, 0, 0);
+            assertNotNull(section, "Section should generate");
+
+            int oakIndex = findPaletteIndex(section, "oak_planks");
+            int airIndex = findPaletteIndex(section, "minecraft:air");
+            assertTrue(oakIndex >= 0, "Oak planks must be present in palette");
+            assertTrue(airIndex >= 0, "Air must remain in palette");
+
+            assertEquals(oakIndex, getBlockIndex(section, 0, 0, 0), "Block at y=0 should be oak planks");
+            assertEquals(oakIndex, getBlockIndex(section, 0, 4, 0), "Block at y=4 should be oak planks");
+            assertEquals(oakIndex, getBlockIndex(section, 0, 8, 0), "Block at y=8 should be oak planks");
+            assertEquals(airIndex, getBlockIndex(section, 0, 2, 0), "Block at y=2 should remain air");
+            assertEquals(2, section.palette().length, "Only air and oak planks expected in palette");
+        } finally {
+            if (program != null) {
+                PainterParser.freeProgram(program);
+            }
+        }
     }
 }

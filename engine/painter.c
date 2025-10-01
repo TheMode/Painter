@@ -1,6 +1,7 @@
 #include "painter.h"
 #include "builtin_macros.h"
 #include "builtin_functions.h"
+#include "builtin_occurrences.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,9 +129,11 @@ static Expression *parse_function_call(Parser *parser, const char *name);
 static Instruction *parse_instruction(Parser *parser);
 static BlockPlacement parse_block_placement(Parser *parser);
 static ForLoop parse_for_loop(Parser *parser);
+static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence);
+static bool parse_occurrence_body(Parser *parser, Occurrence *occurrence);
 static Occurrence parse_occurrence(Parser *parser);
-static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_name);
-static Occurrence parse_named_occurrence(Parser *parser, const char *name);
+static Occurrence parse_occurrence_definition(Parser *parser, const char *name);
+static Occurrence parse_occurrence_reference(Parser *parser, const char *name);
 static PaletteDefinition parse_palette_definition(Parser *parser);
 static MacroCall parse_macro_call(Parser *parser);
 
@@ -593,8 +596,79 @@ static ForLoop parse_for_loop(Parser *parser) {
   return loop;
 }
 
+static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
+  expression_list_reset(&occurrence->args);
+  occurrence->condition = NULL;
+
+  if (consume(TOKEN_LEFT_PAREN)) {
+    while (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
+      Expression *arg = parse_expression(parser);
+      if (!arg) {
+        return false;
+      }
+
+      if (!expression_list_push(parser, &occurrence->args, arg)) {
+        expression_free(arg);
+        return false;
+      }
+
+      if (!consume(TOKEN_COMMA)) {
+        break;
+      }
+    }
+
+    if (!expect_token(parser, TOKEN_RIGHT_PAREN, "Expected ')' after occurrence arguments")) {
+      return false;
+    }
+  }
+
+  TokenType type = peek_type();
+  if (type == TOKEN_RIGHT_ANGLE || type == TOKEN_LEFT_ANGLE ||
+      type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL ||
+      type == TOKEN_GREATER_EQUAL || type == TOKEN_LESS_EQUAL) {
+    occurrence->condition = parse_expression(parser);
+    if (!occurrence->condition) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool parse_occurrence_body(Parser *parser, Occurrence *occurrence) {
+  instruction_list_reset(&occurrence->body);
+
+  if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' after occurrence header")) {
+    return false;
+  }
+
+  while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
+    Instruction *instr = parse_instruction(parser);
+    if (!instr) {
+      if (parser->has_error) break;
+      continue;
+    }
+    if (!instruction_list_push(parser, &occurrence->body, instr)) {
+      instruction_free(instr);
+      return false;
+    }
+  }
+
+  if (!consume(TOKEN_RIGHT_BRACE)) {
+    parser_error(parser, "Expected '}' after occurrence body");
+    return false;
+  }
+
+  return true;
+}
+
 static Occurrence parse_occurrence(Parser *parser) {
   Occurrence occurrence = {0};
+  occurrence.kind = OCCURRENCE_KIND_IMMEDIATE;
+  occurrence.name[0] = '\0';
+  occurrence.condition = NULL;
+  expression_list_reset(&occurrence.args);
+  instruction_list_reset(&occurrence.body);
 
   next(); // consume '@'
 
@@ -604,69 +678,64 @@ static Occurrence parse_occurrence(Parser *parser) {
     return occurrence;
   }
 
-  char type_name[MAX_TOKEN_VALUE_LENGTH];
-  strncpy(type_name, type_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  type_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  strncpy(occurrence.type, type_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   next();
 
-  return parse_occurrence_from_type(parser, type_name);
-}
-
-static Occurrence parse_named_occurrence(Parser *parser, const char *name) {
-  return parse_occurrence_from_type(parser, name);
-}
-
-static Occurrence parse_occurrence_from_type(Parser *parser, const char *type_name) {
-  Occurrence occurrence = {0};
-
-  strncpy(occurrence.type, type_name, MAX_TOKEN_VALUE_LENGTH - 1);
-  occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  expression_list_reset(&occurrence.args);
-  instruction_list_reset(&occurrence.body);
-
-  if (consume(TOKEN_LEFT_PAREN)) {
-    while (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
-      Expression *arg = parse_expression(parser);
-      if (!arg) return occurrence;
-
-      if (!expression_list_push(parser, &occurrence.args, arg)) {
-        expression_free(arg);
-        return occurrence;
-      }
-      if (!consume(TOKEN_COMMA)) break;
-    }
-
-    if (!expect_token(parser, TOKEN_RIGHT_PAREN, "Expected ')' after occurrence arguments")) {
-      return occurrence;
-    }
-  }
-
-  occurrence.condition = NULL;
-  TokenType type = peek_type();
-  if (type == TOKEN_RIGHT_ANGLE || type == TOKEN_LEFT_ANGLE ||
-      type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL ||
-      type == TOKEN_GREATER_EQUAL || type == TOKEN_LESS_EQUAL) {
-    occurrence.condition = parse_expression(parser);
-  }
-
-  if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' after occurrence header")) {
+  if (!parse_occurrence_header(parser, &occurrence)) {
     return occurrence;
   }
 
-  while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
-    Instruction *instr = parse_instruction(parser);
-    if (!instr) {
-      if (parser->has_error) break;
-      continue;
-    }
-    if (!instruction_list_push(parser, &occurrence.body, instr)) {
-      instruction_free(instr);
-      break;
-    }
+  if (!parse_occurrence_body(parser, &occurrence)) {
+    return occurrence;
   }
 
-  if (!consume(TOKEN_RIGHT_BRACE)) {
-    parser_error(parser, "Expected '}' after occurrence body");
+  return occurrence;
+}
+
+static Occurrence parse_occurrence_definition(Parser *parser, const char *name) {
+  Occurrence occurrence = {0};
+  occurrence.kind = OCCURRENCE_KIND_DEFINITION;
+  strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  occurrence.condition = NULL;
+  expression_list_reset(&occurrence.args);
+  instruction_list_reset(&occurrence.body);
+
+  if (!consume(TOKEN_AT)) {
+    parser_error(parser, "Expected '@' for occurrence definition");
+    return occurrence;
+  }
+
+  Token type_token = peek();
+  if (type_token.type != TOKEN_IDENTIFIER) {
+    parser_error(parser, "Expected occurrence type");
+    return occurrence;
+  }
+
+  strncpy(occurrence.type, type_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
+  occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  next();
+
+  if (!parse_occurrence_header(parser, &occurrence)) {
+    return occurrence;
+  }
+
+  return occurrence;
+}
+
+static Occurrence parse_occurrence_reference(Parser *parser, const char *name) {
+  Occurrence occurrence = {0};
+  occurrence.kind = OCCURRENCE_KIND_REFERENCE;
+  strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  occurrence.type[0] = '\0';
+  occurrence.condition = NULL;
+  expression_list_reset(&occurrence.args);
+  instruction_list_reset(&occurrence.body);
+
+  if (!parse_occurrence_body(parser, &occurrence)) {
+    return occurrence;
   }
 
   return occurrence;
@@ -865,7 +934,7 @@ static Instruction *parse_instruction(Parser *parser) {
         return instr;
       } else if (peek_type() == TOKEN_AT) {
         instr->type = INSTR_OCCURRENCE;
-        instr->occurrence = parse_occurrence(parser);
+        instr->occurrence = parse_occurrence_definition(parser, name);
         if (parser->has_error) {
           free(instr);
           return NULL;
@@ -884,7 +953,7 @@ static Instruction *parse_instruction(Parser *parser) {
       }
     } else if (peek_type() == TOKEN_LEFT_BRACE) {
       instr->type = INSTR_OCCURRENCE;
-      instr->occurrence = parse_named_occurrence(parser, name);
+      instr->occurrence = parse_occurrence_reference(parser, name);
       if (parser->has_error) {
         free(instr);
         return NULL;
@@ -1044,6 +1113,129 @@ void macro_registry_free(MacroRegistry *registry) {
   registry->entries = NULL;
   registry->entry_count = 0;
   registry->entry_capacity = 0;
+}
+
+// Occurrence registry implementation
+void occurrence_registry_init(OccurrenceRegistry *registry) {
+  registry->entries = NULL;
+  registry->entry_count = 0;
+  registry->entry_capacity = 0;
+}
+
+static void occurrence_registry_entry_free(OccurrenceRegistryEntry *entry) {
+  if (!entry) return;
+  free(entry->args);
+  entry->args = NULL;
+  entry->arg_count = 0;
+}
+
+void occurrence_registry_free(OccurrenceRegistry *registry) {
+  if (!registry) return;
+  for (size_t i = 0; i < registry->entry_count; i++) {
+    occurrence_registry_entry_free(&registry->entries[i]);
+  }
+  free(registry->entries);
+  registry->entries = NULL;
+  registry->entry_count = 0;
+  registry->entry_capacity = 0;
+}
+
+OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry, const char *name) {
+  if (!registry || !name) return NULL;
+  for (size_t i = 0; i < registry->entry_count; i++) {
+    if (strcmp(registry->entries[i].name, name) == 0) {
+      return &registry->entries[i];
+    }
+  }
+  return NULL;
+}
+
+bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type,
+                             const double *args, size_t arg_count) {
+  if (!registry || !name || !type) {
+    return false;
+  }
+
+  OccurrenceRegistryEntry *entry = occurrence_registry_lookup(registry, name);
+  if (!entry) {
+    if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
+                         registry->entry_count, sizeof(*registry->entries))) {
+      return false;
+    }
+
+    entry = &registry->entries[registry->entry_count++];
+    entry->args = NULL;
+    entry->arg_count = 0;
+    strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+    entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  } else {
+    occurrence_registry_entry_free(entry);
+  }
+
+  strncpy(entry->type, type, MAX_TOKEN_VALUE_LENGTH - 1);
+  entry->type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  entry->arg_count = arg_count;
+
+  if (arg_count > 0) {
+    entry->args = malloc(sizeof(double) * arg_count);
+    if (!entry->args) {
+      entry->arg_count = 0;
+      return false;
+    }
+    for (size_t i = 0; i < arg_count; i++) {
+      entry->args[i] = args ? args[i] : 0.0;
+    }
+  } else {
+    entry->args = NULL;
+  }
+
+  return true;
+}
+
+void occurrence_type_registry_init(OccurrenceTypeRegistry *registry) {
+  if (!registry) return;
+  registry->entries = NULL;
+  registry->entry_count = 0;
+  registry->entry_capacity = 0;
+}
+
+void occurrence_type_registry_free(OccurrenceTypeRegistry *registry) {
+  if (!registry) return;
+  free(registry->entries);
+  registry->entries = NULL;
+  registry->entry_count = 0;
+  registry->entry_capacity = 0;
+}
+
+void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name,
+                                       OccurrenceGenerator generator) {
+  if (!registry || !name || !generator) {
+    return;
+  }
+
+  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
+                       registry->entry_count, sizeof(*registry->entries))) {
+    return;
+  }
+
+  OccurrenceTypeRegistryEntry *entry = &registry->entries[registry->entry_count++];
+  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  entry->generator = generator;
+}
+
+OccurrenceGenerator occurrence_type_registry_lookup(OccurrenceTypeRegistry *registry, const char *name) {
+  if (!registry || !name) {
+    return NULL;
+  }
+
+  for (size_t i = 0; i < registry->entry_count; i++) {
+    if (strcmp(registry->entries[i].name, name) == 0) {
+      return registry->entries[i].generator;
+    }
+  }
+
+  return NULL;
 }
 
 // Function registry implementation
@@ -1286,120 +1478,209 @@ double painter_evaluate_expression(const Expression *expr, VariableContext *ctx,
   return 0.0;
 }
 
+typedef struct {
+  VariableContext *variables;
+  MacroRegistry *macros;
+  FunctionRegistry *functions;
+  OccurrenceRegistry *occurrences;
+  OccurrenceTypeRegistry *occurrence_types;
+  int base_x;
+  int base_y;
+  int base_z;
+  int *block_indices;
+  char ***palette;
+  int *palette_size;
+  int *palette_capacity;
+} ExecutionState;
+
 // Forward declaration for recursive processing
-static void process_instruction(Instruction *instr, VariableContext *ctx,
-                                MacroRegistry *macro_registry,
-                                FunctionRegistry *function_registry,
-                                int base_x, int base_y, int base_z,
-                                int *block_indices, char ***palette, 
-                                int *palette_size, int *palette_capacity);
+static void process_instruction(Instruction *instr, ExecutionState *state,
+                                int origin_x, int origin_y, int origin_z);
+static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state,
+                                           int origin_x, int origin_y, int origin_z);
 
 
 // Process a single instruction and its effects on the section
-static void process_instruction(Instruction *instr, VariableContext *ctx,
-                                MacroRegistry *macro_registry,
-                                FunctionRegistry *function_registry,
-                                int base_x, int base_y, int base_z,
-                                int *block_indices, char ***palette,
-                                int *palette_size, int *palette_capacity) {
-  if (!instr) return;
-  
+static void process_instruction(Instruction *instr, ExecutionState *state,
+                                int origin_x, int origin_y, int origin_z) {
+  if (!instr || !state) return;
+
   switch (instr->type) {
     case INSTR_BLOCK_PLACEMENT: {
       BlockPlacement *placement = &instr->block_placement;
-      
+
       if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
-        // Evaluate coordinates
-        int x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, ctx,
-                                                 function_registry);
-        int y = placement->coordinate->coordinate.y ? 
-                (int)painter_evaluate_expression(placement->coordinate->coordinate.y, ctx,
-                                                  function_registry) : 0;
-        int z = (int)painter_evaluate_expression(placement->coordinate->coordinate.z, ctx,
-                                                 function_registry);
-        
-        // Check if block is within this section
-        if (x >= base_x && x < base_x + 16 &&
-            y >= base_y && y < base_y + 16 &&
-            z >= base_z && z < base_z + 16) {
-          
-          // Convert to section-local coordinates
-          int local_x = x - base_x;
-          int local_y = y - base_y;
-          int local_z = z - base_z;
-          
-          // Calculate index in block array
-          // Standard Minecraft format: y*256 + z*16 + x (array[y][z][x])
+        int offset_x = (int)painter_evaluate_expression(
+            placement->coordinate->coordinate.x, state->variables, state->functions);
+        int offset_y = placement->coordinate->coordinate.y ?
+                        (int)painter_evaluate_expression(placement->coordinate->coordinate.y,
+                                                          state->variables, state->functions) : 0;
+        int offset_z = placement->coordinate->coordinate.z ?
+                        (int)painter_evaluate_expression(placement->coordinate->coordinate.z,
+                                                          state->variables, state->functions) : 0;
+
+        int world_x = origin_x + offset_x;
+        int world_y = origin_y + offset_y;
+        int world_z = origin_z + offset_z;
+
+        if (world_x >= state->base_x && world_x < state->base_x + 16 &&
+            world_y >= state->base_y && world_y < state->base_y + 16 &&
+            world_z >= state->base_z && world_z < state->base_z + 16) {
+
+          int local_x = world_x - state->base_x;
+          int local_y = world_y - state->base_y;
+          int local_z = world_z - state->base_z;
           int block_index = local_y * 256 + local_z * 16 + local_x;
-          
-          // Create full block string
+
           char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
           painter_format_block(block_string, sizeof(block_string),
                                placement->block_name, placement->block_properties);
-          
-          // Get or add to palette
-          int palette_index = painter_palette_get_or_add(palette, palette_size,
-                                                         palette_capacity, block_string);
-          if (palette_index < 0) {
-            break;
+
+          int palette_index = painter_palette_get_or_add(state->palette, state->palette_size,
+                                                         state->palette_capacity, block_string);
+          if (palette_index >= 0) {
+            state->block_indices[block_index] = palette_index;
           }
-          
-          block_indices[block_index] = palette_index;
         }
       }
       break;
     }
-    
+
     case INSTR_ASSIGNMENT: {
       Assignment *assignment = &instr->assignment;
-      double value = painter_evaluate_expression(assignment->value, ctx, function_registry);
-      context_set(ctx, assignment->name, value);
+      double value = painter_evaluate_expression(assignment->value, state->variables, state->functions);
+      context_set(state->variables, assignment->name, value);
       break;
     }
-    
+
     case INSTR_FOR_LOOP: {
       ForLoop *loop = &instr->for_loop;
-      
-      // Evaluate loop bounds
-      int start = (int)painter_evaluate_expression(loop->start, ctx, function_registry);
-      int end = (int)painter_evaluate_expression(loop->end, ctx, function_registry);
-      
-      // Execute loop body for each iteration
+
+      int start = (int)painter_evaluate_expression(loop->start, state->variables, state->functions);
+      int end = (int)painter_evaluate_expression(loop->end, state->variables, state->functions);
+
       for (int i = start; i < end; i++) {
-        // Set loop variable
-        context_set(ctx, loop->variable, (double)i);
-        
-        // Process all body instructions
+        context_set(state->variables, loop->variable, (double)i);
+
         for (size_t j = 0; j < loop->body.count; j++) {
-          process_instruction(loop->body.items[j], ctx, macro_registry, function_registry,
-                              base_x, base_y, base_z,
-                              block_indices, palette, palette_size, palette_capacity);
+          process_instruction(loop->body.items[j], state, origin_x, origin_y, origin_z);
         }
       }
       break;
     }
-    
+
     case INSTR_MACRO_CALL: {
       MacroCall *macro_call = &instr->macro_call;
-      
-      // Look up the macro generator
-      MacroGenerator generator = macro_registry_lookup(macro_registry, macro_call->name);
+      MacroGenerator generator = macro_registry_lookup(state->macros, macro_call->name);
       if (generator) {
-        // Execute the macro
-        generator(ctx, &macro_call->arguments, function_registry,
-                  base_x, base_y, base_z, block_indices, palette, 
-                  palette_size, palette_capacity);
+        generator(state->variables, &macro_call->arguments, state->functions,
+                  state->base_x, state->base_y, state->base_z,
+                  state->block_indices, state->palette,
+                  state->palette_size, state->palette_capacity);
       }
       break;
     }
-    
-    case INSTR_OCCURRENCE:
-      // TODO: Implement occurrence handling
+
+    case INSTR_OCCURRENCE: {
+      execute_occurrence_instruction(&instr->occurrence, state, origin_x, origin_y, origin_z);
       break;
-    
+    }
+
     case INSTR_PALETTE_DEFINITION:
       // TODO: Implement palette definition handling
       break;
+  }
+}
+
+static void occurrence_runtime_run_body(void *userdata, const InstructionList *body,
+                                        int anchor_x, int anchor_y, int anchor_z) {
+  ExecutionState *state = (ExecutionState *)userdata;
+  if (!state || !body) {
+    return;
+  }
+
+  for (size_t i = 0; i < body->count; i++) {
+    process_instruction(body->items[i], state, anchor_x, anchor_y, anchor_z);
+  }
+}
+
+static void execute_occurrence_by_type(const char *type, const double *args, size_t arg_count,
+                                       const InstructionList *body, ExecutionState *state,
+                                       int origin_x, int origin_y, int origin_z) {
+  if (!type || !state || !state->occurrence_types) {
+    return;
+  }
+
+  OccurrenceGenerator generator = occurrence_type_registry_lookup(state->occurrence_types, type);
+  if (!generator) {
+    return;
+  }
+
+  OccurrenceRuntime runtime = {
+      .base_x = state->base_x,
+      .base_y = state->base_y,
+      .base_z = state->base_z,
+      .run_body = occurrence_runtime_run_body,
+      .userdata = state,
+  };
+
+  generator(args, arg_count, body, origin_x, origin_y, origin_z, &runtime);
+}
+
+static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state,
+                                           int origin_x, int origin_y, int origin_z) {
+  if (!occurrence || !state) return;
+
+  switch (occurrence->kind) {
+    case OCCURRENCE_KIND_DEFINITION: {
+      size_t arg_count = occurrence->args.count;
+      double *values = NULL;
+      if (arg_count > 0) {
+        values = malloc(sizeof(double) * arg_count);
+        if (!values) {
+          return;
+        }
+        for (size_t i = 0; i < arg_count; i++) {
+          values[i] = painter_evaluate_expression(occurrence->args.items[i],
+                                                  state->variables, state->functions);
+        }
+      }
+
+      occurrence_registry_set(state->occurrences, occurrence->name, occurrence->type,
+                              values, arg_count);
+      free(values);
+      break;
+    }
+
+    case OCCURRENCE_KIND_REFERENCE: {
+      OccurrenceRegistryEntry *entry = occurrence_registry_lookup(state->occurrences, occurrence->name);
+      if (!entry) {
+        return;
+      }
+      execute_occurrence_by_type(entry->type, entry->args, entry->arg_count,
+                                 &occurrence->body, state, origin_x, origin_y, origin_z);
+      break;
+    }
+
+    case OCCURRENCE_KIND_IMMEDIATE: {
+      size_t arg_count = occurrence->args.count;
+      double *values = NULL;
+      if (arg_count > 0) {
+        values = malloc(sizeof(double) * arg_count);
+        if (!values) {
+          return;
+        }
+        for (size_t i = 0; i < arg_count; i++) {
+          values[i] = painter_evaluate_expression(occurrence->args.items[i],
+                                                  state->variables, state->functions);
+        }
+      }
+
+      execute_occurrence_by_type(occurrence->type, values, arg_count,
+                                 &occurrence->body, state, origin_x, origin_y, origin_z);
+      free(values);
+      break;
+    }
   }
 }
 
@@ -1439,19 +1720,38 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   FunctionRegistry function_registry;
   function_registry_init(&function_registry);
   register_builtin_functions(&function_registry);
+  OccurrenceTypeRegistry occurrence_type_registry;
+  occurrence_type_registry_init(&occurrence_type_registry);
+  register_builtin_occurrences(&occurrence_type_registry);
+  OccurrenceRegistry occurrence_registry;
+  occurrence_registry_init(&occurrence_registry);
+
+  ExecutionState state = {
+    .variables = &ctx,
+    .macros = &macro_registry,
+    .functions = &function_registry,
+    .occurrences = &occurrence_registry,
+    .occurrence_types = &occurrence_type_registry,
+    .base_x = base_x,
+    .base_y = base_y,
+    .base_z = base_z,
+    .block_indices = block_indices,
+    .palette = &section->palette,
+    .palette_size = &section->palette_size,
+    .palette_capacity = &palette_capacity,
+  };
   
   // Process all instructions
   for (int i = 0; i < program->instruction_count; i++) {
-    process_instruction(program->instructions[i], &ctx, &macro_registry, &function_registry,
-                       base_x, base_y, base_z,
-                       block_indices, &section->palette, 
-                       &section->palette_size, &palette_capacity);
+    process_instruction(program->instructions[i], &state, 0, 0, 0);
   }
   
   // Clean up
   context_free(&ctx);
   macro_registry_free(&macro_registry);
   function_registry_free(&function_registry);
+  occurrence_type_registry_free(&occurrence_type_registry);
+  occurrence_registry_free(&occurrence_registry);
   
   // Calculate bits per entry
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);
