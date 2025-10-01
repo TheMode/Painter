@@ -35,6 +35,16 @@ static double fn_ceil(const double *args, size_t count) {
   return ceil(args[0]);
 }
 
+static double fn_round(const double *args, size_t count) {
+  (void)count;
+  return round(args[0]);
+}
+
+static double fn_trunc(const double *args, size_t count) {
+  (void)count;
+  return trunc(args[0]);
+}
+
 static double fn_abs(const double *args, size_t count) {
   (void)count;
   return fabs(args[0]);
@@ -62,6 +72,22 @@ static double fn_step(const double *args, size_t count) {
   return x < edge ? 0.0 : 1.0;
 }
 
+static double fn_mod(const double *args, size_t count) {
+  (void)count;
+  double divisor = args[1];
+  if (divisor == 0.0) {
+    return 0.0;
+  }
+  double result = fmod(args[0], divisor);
+  if (result == 0.0) {
+    return 0.0;
+  }
+  if ((result < 0.0 && divisor > 0.0) || (result > 0.0 && divisor < 0.0)) {
+    result += divisor;
+  }
+  return result;
+}
+
 static double fn_sin(const double *args, size_t count) {
   (void)count;
   return sin(args[0]);
@@ -77,6 +103,26 @@ static double fn_tan(const double *args, size_t count) {
   return tan(args[0]);
 }
 
+static double fn_asin(const double *args, size_t count) {
+  (void)count;
+  return asin(args[0]);
+}
+
+static double fn_acos(const double *args, size_t count) {
+  (void)count;
+  return acos(args[0]);
+}
+
+static double fn_atan(const double *args, size_t count) {
+  (void)count;
+  return atan(args[0]);
+}
+
+static double fn_atan2(const double *args, size_t count) {
+  (void)count;
+  return atan2(args[0], args[1]);
+}
+
 static double fn_sqrt(const double *args, size_t count) {
   (void)count;
   return sqrt(args[0]);
@@ -87,19 +133,93 @@ static double fn_pow(const double *args, size_t count) {
   return pow(args[0], args[1]);
 }
 
+static double fn_sum(const double *args, size_t count) {
+  double total = 0.0;
+  for (size_t i = 0; i < count; i++) {
+    total += args[i];
+  }
+  return total;
+}
+
+static double fn_avg(const double *args, size_t count) {
+  if (count == 0) {
+    return 0.0;
+  }
+  return fn_sum(args, count) / (double)count;
+}
+
+static double fn_product(const double *args, size_t count) {
+  double result = 1.0;
+  for (size_t i = 0; i < count; i++) {
+    result *= args[i];
+  }
+  return result;
+}
+
+static double fn_log(const double *args, size_t count) {
+  (void)count;
+  return log(args[0]);
+}
+
+static double fn_log10(const double *args, size_t count) {
+  (void)count;
+  return log10(args[0]);
+}
+
+static double fn_exp(const double *args, size_t count) {
+  (void)count;
+  return exp(args[0]);
+}
+
+static double fn_between(const double *args, size_t count) {
+  (void)count;
+  double value = args[0];
+  double min_value = args[1];
+  double max_value = args[2];
+  if (min_value > max_value) {
+    double tmp = min_value;
+    min_value = max_value;
+    max_value = tmp;
+  }
+  return (value >= min_value && value <= max_value) ? 1.0 : 0.0;
+}
+
+static double fn_equal(const double *args, size_t count) {
+  double tolerance = 1e-9;
+  if (count >= 3) {
+    tolerance = fabs(args[2]);
+  }
+  return fabs(args[0] - args[1]) <= tolerance ? 1.0 : 0.0;
+}
+
 const BuiltinFunctionSpec BUILTIN_FUNCTIONS[] = {
     {"min", 1, SIZE_MAX, fn_min},
     {"max", 1, SIZE_MAX, fn_max},
     {"floor", 1, 1, fn_floor},
     {"ceil", 1, 1, fn_ceil},
+    {"round", 1, 1, fn_round},
+    {"trunc", 1, 1, fn_trunc},
     {"abs", 1, 1, fn_abs},
     {"clamp", 3, 3, fn_clamp},
     {"step", 2, 2, fn_step},
+    {"mod", 2, 2, fn_mod},
+    {"sum", 1, SIZE_MAX, fn_sum},
+    {"avg", 1, SIZE_MAX, fn_avg},
+    {"product", 1, SIZE_MAX, fn_product},
     {"sin", 1, 1, fn_sin},
     {"cos", 1, 1, fn_cos},
     {"tan", 1, 1, fn_tan},
+    {"asin", 1, 1, fn_asin},
+    {"acos", 1, 1, fn_acos},
+    {"atan", 1, 1, fn_atan},
+    {"atan2", 2, 2, fn_atan2},
+    {"log", 1, 1, fn_log},
+    {"log10", 1, 1, fn_log10},
+    {"exp", 1, 1, fn_exp},
     {"sqrt", 1, 1, fn_sqrt},
     {"pow", 2, 2, fn_pow},
+    {"between", 3, 3, fn_between},
+    {"equal", 2, 3, fn_equal},
 };
 
 const size_t BUILTIN_FUNCTION_COUNT = sizeof(BUILTIN_FUNCTIONS) / sizeof(BuiltinFunctionSpec);

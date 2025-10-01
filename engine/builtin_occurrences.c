@@ -3,6 +3,31 @@
 #include "FastNoiseLite.h"
 
 #include <math.h>
+#include <stdint.h>
+
+static int floor_div_int(int numerator, int denominator) {
+  int64_t dividend = numerator;
+  int64_t divisor = denominator;
+
+  int64_t quotient = dividend / divisor;
+  int64_t remainder = dividend % divisor;
+  if (remainder != 0 && ((remainder < 0) != (divisor < 0))) {
+    quotient -= 1;
+  }
+  return (int)quotient;
+}
+
+static int ceil_div_int(int numerator, int denominator) {
+  int64_t dividend = numerator;
+  int64_t divisor = denominator;
+
+  int64_t quotient = dividend / divisor;
+  int64_t remainder = dividend % divisor;
+  if (remainder != 0 && ((remainder < 0) == (divisor < 0))) {
+    quotient += 1;
+  }
+  return (int)quotient;
+}
 
 static void compute_iteration_bounds(int origin, int step, int range_min, int range_max, int *start, int *end) {
   if (!start || !end) {
@@ -15,20 +40,27 @@ static void compute_iteration_bounds(int origin, int step, int range_min, int ra
     return;
   }
 
-  double step_d = (double)step;
-  double n1 = (range_min - origin) / step_d;
-  double n2 = (range_max - origin) / step_d;
-  double n_min = fmin(n1, n2);
-  double n_max = fmax(n1, n2);
-  int min_val = (int)ceil(n_min);
-  int max_val = (int)floor(n_max);
+  if (step > 0) {
+    const int lower = ceil_div_int(range_min - origin, step);
+    const int upper = floor_div_int(range_max - origin, step);
+    if (lower > upper) {
+      *start = 0;
+      *end = -1;
+    } else {
+      *start = lower;
+      *end = upper;
+    }
+    return;
+  }
 
-  if (min_val > max_val) {
+  const int lower = ceil_div_int(range_max - origin, step);
+  const int upper = floor_div_int(range_min - origin, step);
+  if (lower > upper) {
     *start = 0;
     *end = -1;
   } else {
-    *start = min_val;
-    *end = max_val;
+    *start = lower;
+    *end = upper;
   }
 }
 
@@ -52,26 +84,36 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
   int step_z = (int)llround(painter_evaluate_expression(step_z_expr, state));
 
   const int SEARCH_MARGIN = 16;
+  const int base_x = runtime->base_x;
+  const int base_y = runtime->base_y;
+  const int base_z = runtime->base_z;
 
-  int range_min_x = runtime->base_x - SEARCH_MARGIN;
-  int range_max_x = runtime->base_x + 15 + SEARCH_MARGIN;
-  int range_min_y = runtime->base_y - SEARCH_MARGIN;
-  int range_max_y = runtime->base_y + 15 + SEARCH_MARGIN;
-  int range_min_z = runtime->base_z - SEARCH_MARGIN;
-  int range_max_z = runtime->base_z + 15 + SEARCH_MARGIN;
+  const int range_min_x = base_x - SEARCH_MARGIN;
+  const int range_max_x = base_x + 15 + SEARCH_MARGIN;
+  const int range_min_y = base_y - SEARCH_MARGIN;
+  const int range_max_y = base_y + 15 + SEARCH_MARGIN;
+  const int range_min_z = base_z - SEARCH_MARGIN;
+  const int range_max_z = base_z + 15 + SEARCH_MARGIN;
 
   int kx_start, kx_end, ky_start, ky_end, kz_start, kz_end;
   compute_iteration_bounds(origin_x, step_x, range_min_x, range_max_x, &kx_start, &kx_end);
   compute_iteration_bounds(origin_y, step_y, range_min_y, range_max_y, &ky_start, &ky_end);
   compute_iteration_bounds(origin_z, step_z, range_min_z, range_max_z, &kz_start, &kz_end);
 
-  for (int kx = kx_start; kx <= kx_end; kx++) {
-    int anchor_x = origin_x + step_x * kx;
-    for (int ky = ky_start; ky <= ky_end; ky++) {
-      int anchor_y = origin_y + step_y * ky;
-      for (int kz = kz_start; kz <= kz_end; kz++) {
-        int anchor_z = origin_z + step_z * kz;
-        runtime->run_body(runtime->userdata, body, anchor_x, anchor_y, anchor_z);
+  if (kx_start > kx_end || ky_start > ky_end || kz_start > kz_end) {
+    return;
+  }
+
+  void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
+  void *userdata = runtime->userdata;
+
+  int anchor_x = origin_x + step_x * kx_start;
+  for (int kx = kx_start; kx <= kx_end; ++kx, anchor_x += step_x) {
+    int anchor_y = origin_y + step_y * ky_start;
+    for (int ky = ky_start; ky <= ky_end; ++ky, anchor_y += step_y) {
+      int anchor_z = origin_z + step_z * kz_start;
+      for (int kz = kz_start; kz <= kz_end; ++kz, anchor_z += step_z) {
+        run_body(userdata, body, anchor_x, anchor_y, anchor_z);
       }
     }
   }
@@ -119,37 +161,103 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
   noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
 
   const int SEARCH_MARGIN = 16;
-  int range_min_x = runtime->base_x - SEARCH_MARGIN;
-  int range_max_x = runtime->base_x + 15 + SEARCH_MARGIN;
-  int range_min_z = runtime->base_z - SEARCH_MARGIN;
-  int range_max_z = runtime->base_z + 15 + SEARCH_MARGIN;
+  const int base_x = runtime->base_x;
+  const int base_z = runtime->base_z;
+
+  const int range_min_x = base_x - SEARCH_MARGIN;
+  const int range_max_x = base_x + 15 + SEARCH_MARGIN;
+  const int range_min_z = base_z - SEARCH_MARGIN;
+  const int range_max_z = base_z + 15 + SEARCH_MARGIN;
 
   // Sample noise for each XZ coordinate
-  for (int x = range_min_x; x <= range_max_x; x++) {
-    for (int z = range_min_z; z <= range_max_z; z++) {
-      float world_x = (float)(x + origin_x);
-      float world_z = (float)(z + origin_z);
+  const bool apply_threshold = threshold >= 0.0f;
+  const bool apply_amplitude = amplitude != 0.0f;
+  const float threshold_value = threshold;
+  void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
+  void *userdata = runtime->userdata;
 
-      // Get noise value (-1 to 1)
-      float noise_value = fnlGetNoise2D(&noise, world_x, world_z);
+  const int origin_offset_y = origin_y;
+  const int amplitude_base_y = base_y + origin_y;
 
-      // Check threshold if provided (normalize to 0-1 for comparison)
-      if (threshold >= 0.0f) {
-        float normalized_noise = (noise_value + 1.0f) * 0.5f;
-        if (normalized_noise < threshold) {
-          continue; // Skip this position
+  for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
+    for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
+      const float noise_value = fnlGetNoise2D(&noise, (float)anchor_x, (float)anchor_z);
+
+      if (apply_threshold) {
+        const float normalized_noise = (noise_value + 1.0f) * 0.5f;
+        if (normalized_noise < threshold_value) {
+          continue;
         }
       }
 
-      // Calculate Y position
-      int y_position = origin_y;
-      if (amplitude != 0.0f) {
-        int height_offset = (int)roundf(noise_value * amplitude);
-        y_position = base_y + height_offset + origin_y;
+      int anchor_y = origin_offset_y;
+      if (apply_amplitude) {
+        const int height_offset = (int)lroundf(noise_value * amplitude);
+        anchor_y = amplitude_base_y + height_offset;
       }
 
-      // Run the body at this position
-      runtime->run_body(runtime->userdata, body, x + origin_x, y_position, z + origin_z);
+      run_body(userdata, body, anchor_x, anchor_y, anchor_z);
+    }
+  }
+}
+
+// @noise3d .frequency=<val> .seed=<val> [.threshold=<val>]
+// Samples 3D noise and executes the body at positions that satisfy the threshold
+static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
+    OccurrenceRuntime *runtime) {
+  if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
+    return;
+  }
+
+  Expression *frequency_expr = named_arg_get(args, "frequency");
+  Expression *seed_expr = named_arg_get(args, "seed");
+  Expression *threshold_expr = named_arg_get(args, "threshold");
+
+  if (!frequency_expr || !seed_expr) {
+    return;
+  }
+
+  const float frequency = (float)painter_evaluate_expression(frequency_expr, state);
+  const int seed = (int)llround(painter_evaluate_expression(seed_expr, state));
+  const float threshold = threshold_expr ? (float)painter_evaluate_expression(threshold_expr, state) : -1.0f;
+
+  fnl_state noise = fnlCreateState();
+  noise.seed = seed;
+  noise.frequency = frequency;
+  noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
+
+  const int SEARCH_MARGIN = 16;
+  const int base_x = runtime->base_x;
+  const int base_y = runtime->base_y;
+  const int base_z = runtime->base_z;
+
+  const int range_min_x = base_x - SEARCH_MARGIN;
+  const int range_max_x = base_x + 15 + SEARCH_MARGIN;
+  const int range_min_y = base_y - SEARCH_MARGIN;
+  const int range_max_y = base_y + 15 + SEARCH_MARGIN;
+  const int range_min_z = base_z - SEARCH_MARGIN;
+  const int range_max_z = base_z + 15 + SEARCH_MARGIN;
+
+  const bool apply_threshold = threshold >= 0.0f;
+  const float threshold_value = threshold;
+
+  void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
+  void *userdata = runtime->userdata;
+
+  for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
+    for (int y = range_min_y, anchor_y = y + origin_y; y <= range_max_y; ++y, ++anchor_y) {
+      for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
+        const float noise_value = fnlGetNoise3D(&noise, (float)anchor_x, (float)anchor_y, (float)anchor_z);
+
+        if (apply_threshold) {
+          const float normalized_noise = (noise_value + 1.0f) * 0.5f;
+          if (normalized_noise < threshold_value) {
+            continue;
+          }
+        }
+
+        run_body(userdata, body, anchor_x, anchor_y, anchor_z);
+      }
     }
   }
 }
@@ -157,6 +265,7 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
 const BuiltinOccurrence BUILTIN_OCCURRENCES[] = {
     {"every", occurrence_every},
     {"noise", occurrence_noise},
+    {"noise3d", occurrence_noise3d},
 };
 
 const size_t BUILTIN_OCCURRENCE_COUNT = sizeof(BUILTIN_OCCURRENCES) / sizeof(BuiltinOccurrence);

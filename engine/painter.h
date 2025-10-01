@@ -302,14 +302,26 @@ struct ExecutionState {
   int base_x;
   int base_y;
   int base_z;
+  int current_origin_x;
+  int current_origin_y;
+  int current_origin_z;
   int *block_indices;
   char ***palette;
   int *palette_size;
   int *palette_capacity;
 };
 
+// Axis-aligned bounding box helper for world coordinates
+typedef struct {
+  int min_x;
+  int max_x;
+  int min_y;
+  int max_y;
+  int min_z;
+  int max_z;
+} PainterAABB;
+
 // Macro generator function type
-// Takes: execution state with variable context, macro arguments, function registry, and section info
 // Modifies block_indices array to place blocks
 typedef void (*MacroGenerator)(ExecutionState *state, const NamedArgumentList *args);
 
@@ -377,4 +389,6 @@ double painter_evaluate_expression(const Expression *expr, ExecutionState *state
 
 // Palette helpers shared between the interpreter and macros
 int painter_palette_get_or_add(ExecutionState *state, const char *block_string);
+bool painter_section_contains_point(const ExecutionState *state, int x, int y, int z);
+bool painter_section_clip_aabb(const ExecutionState *state, PainterAABB *box);
 void painter_format_block(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties);

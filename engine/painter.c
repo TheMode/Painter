@@ -1759,10 +1759,39 @@ double painter_evaluate_expression(const Expression *expr, ExecutionState *state
   return 0.0;
 }
 
-static bool section_contains_world_position(const ExecutionState *state, int x, int y, int z) {
+bool painter_section_contains_point(const ExecutionState *state, int x, int y, int z) {
   if (!state) return false;
-  return x >= state->base_x && x < state->base_x + 16 && y >= state->base_y && y < state->base_y + 16 && z >= state->base_z &&
-         z < state->base_z + 16;
+
+  const int max_x = state->base_x + 15;
+  const int max_y = state->base_y + 15;
+  const int max_z = state->base_z + 15;
+
+  return x >= state->base_x && x <= max_x && y >= state->base_y && y <= max_y && z >= state->base_z && z <= max_z;
+}
+
+bool painter_section_clip_aabb(const ExecutionState *state, PainterAABB *box) {
+  if (!state || !box) return false;
+
+  const int section_min_x = state->base_x;
+  const int section_min_y = state->base_y;
+  const int section_min_z = state->base_z;
+  const int section_max_x = section_min_x + 15;
+  const int section_max_y = section_min_y + 15;
+  const int section_max_z = section_min_z + 15;
+
+  if (box->max_x < section_min_x || box->min_x > section_max_x || box->max_y < section_min_y || box->min_y > section_max_y ||
+      box->max_z < section_min_z || box->min_z > section_max_z) {
+    return false;
+  }
+
+  if (box->min_x < section_min_x) box->min_x = section_min_x;
+  if (box->max_x > section_max_x) box->max_x = section_max_x;
+  if (box->min_y < section_min_y) box->min_y = section_min_y;
+  if (box->max_y > section_max_y) box->max_y = section_max_y;
+  if (box->min_z < section_min_z) box->min_z = section_min_z;
+  if (box->max_z > section_max_z) box->max_z = section_max_z;
+
+  return true;
 }
 
 static bool evaluate_block_position(const BlockPlacement *placement, ExecutionState *state, int origin_x, int origin_y, int origin_z,
@@ -1798,7 +1827,7 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
     if (!evaluate_block_position(&instr->block_placement, state, origin_x, origin_y, origin_z, &world_x, &world_y, &world_z)) {
       return false;
     }
-    return section_contains_world_position(state, world_x, world_y, world_z);
+    return painter_section_contains_point(state, world_x, world_y, world_z);
   }
   default: return true;
   }
@@ -1807,6 +1836,10 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
 // Process a single instruction and its effects on the section
 static void process_instruction(Instruction *instr, ExecutionState *state, int origin_x, int origin_y, int origin_z) {
   if (!instr || !state) return;
+
+  state->current_origin_x = origin_x;
+  state->current_origin_y = origin_y;
+  state->current_origin_z = origin_z;
 
   switch (instr->type) {
   case INSTR_BLOCK_PLACEMENT: {
@@ -1817,7 +1850,7 @@ static void process_instruction(Instruction *instr, ExecutionState *state, int o
       break;
     }
 
-    if (!section_contains_world_position(state, world_x, world_y, world_z)) {
+    if (!painter_section_contains_point(state, world_x, world_y, world_z)) {
       break;
     }
 
@@ -2017,6 +2050,9 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
       .base_x = base_x,
       .base_y = base_y,
       .base_z = base_z,
+      .current_origin_x = 0,
+      .current_origin_y = 0,
+      .current_origin_z = 0,
       .block_indices = block_indices,
       .palette = &section->palette,
       .palette_size = &section->palette_size,
