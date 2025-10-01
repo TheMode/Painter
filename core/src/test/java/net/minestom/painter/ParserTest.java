@@ -441,6 +441,110 @@ class ParserTest {
         
         assertParseSucceed(program);
     }
+
+    @Test
+    @DisplayName("@section occurrence places structure at section offset")
+    void testSectionOccurrenceExecution() {
+        String programSource = """
+                @section .x=8 .z=8 {
+                  [0 0 0] oak_log
+                  [0 1 0] oak_log
+                  [0 2 0] oak_log
+                  [-1 3 0] oak_leaves
+                  [0 3 0] oak_leaves
+                  [1 3 0] oak_leaves
+                }
+                """;
+
+        MemorySegment program = null;
+        try {
+            program = PainterParser.parseString(programSource);
+            PainterParser.SectionData section = PainterParser.generateSection(program, 0, 0, 0);
+            assertNotNull(section, "Section should generate");
+
+            int oakLogIndex = findPaletteIndex(section, "oak_log");
+            int oakLeavesIndex = findPaletteIndex(section, "oak_leaves");
+            int airIndex = findPaletteIndex(section, "minecraft:air");
+            
+            assertTrue(oakLogIndex >= 0, "Oak log must be present in palette");
+            assertTrue(oakLeavesIndex >= 0, "Oak leaves must be present in palette");
+            assertTrue(airIndex >= 0, "Air must remain in palette");
+
+            // Tree trunk at section offset (8, *, 8)
+            assertEquals(oakLogIndex, getBlockIndex(section, 8, 0, 8), "Oak log at y=0, x=8, z=8");
+            assertEquals(oakLogIndex, getBlockIndex(section, 8, 1, 8), "Oak log at y=1, x=8, z=8");
+            assertEquals(oakLogIndex, getBlockIndex(section, 8, 2, 8), "Oak log at y=2, x=8, z=8");
+            
+            // Leaves at top
+            assertEquals(oakLeavesIndex, getBlockIndex(section, 7, 3, 8), "Oak leaves at y=3, x=7, z=8");
+            assertEquals(oakLeavesIndex, getBlockIndex(section, 8, 3, 8), "Oak leaves at y=3, x=8, z=8");
+            assertEquals(oakLeavesIndex, getBlockIndex(section, 9, 3, 8), "Oak leaves at y=3, x=9, z=8");
+            
+            // Verify air at non-tree positions
+            assertEquals(airIndex, getBlockIndex(section, 0, 0, 0), "Air at origin");
+            assertEquals(airIndex, getBlockIndex(section, 15, 15, 15), "Air at corner");
+        } finally {
+            if (program != null) {
+                PainterParser.freeProgram(program);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("@section occurrence with y offset places at correct height")
+    void testSectionOccurrenceWithYOffset() {
+        String programSource = """
+                @section .x=5 .y=10 .z=7 {
+                  [0 0 0] beacon
+                }
+                """;
+
+        MemorySegment program = null;
+        try {
+            program = PainterParser.parseString(programSource);
+            PainterParser.SectionData section = PainterParser.generateSection(program, 0, 0, 0);
+            assertNotNull(section, "Section should generate");
+
+            int beaconIndex = findPaletteIndex(section, "beacon");
+            assertTrue(beaconIndex >= 0, "Beacon must be present in palette");
+
+            // Beacon at section offset (5, 10, 7)
+            assertEquals(beaconIndex, getBlockIndex(section, 5, 10, 7), "Beacon at x=5, y=10, z=7");
+        } finally {
+            if (program != null) {
+                PainterParser.freeProgram(program);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("@section occurrence with default offsets places at section origin")
+    void testSectionOccurrenceDefaultOffsets() {
+        String programSource = """
+                @section {
+                  [0 0 0] gold_block
+                }
+                """;
+
+        MemorySegment program = null;
+        try {
+            program = PainterParser.parseString(programSource);
+            PainterParser.SectionData section = PainterParser.generateSection(program, 0, 0, 0);
+            assertNotNull(section, "Section should generate");
+
+            int goldIndex = findPaletteIndex(section, "gold_block");
+            assertTrue(goldIndex >= 0, "Gold block must be present in palette");
+
+            // Gold block at section origin (0, 0, 0)
+            assertEquals(goldIndex, getBlockIndex(section, 0, 0, 0), "Gold block at origin");
+        } finally {
+            if (program != null) {
+                PainterParser.freeProgram(program);
+            }
+        }
+    }
 }
+
+
 
 

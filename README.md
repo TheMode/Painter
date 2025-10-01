@@ -13,6 +13,7 @@ A declarative language for generating Minecraft worlds programmatically.
   - Easy to add custom macros
 - **Occurrences**: Pattern-based placement using noise and repetition
   - `@every` - Place blocks at regular intervals
+  - `@section` - Place blocks once per section at a specific offset
   - `@noise` - General-purpose noise-based placement (terrain, trees, features)
 
 ## Macro System
@@ -76,6 +77,50 @@ Example:
   [0 0 0] oak_planks
 }
 ```
+
+### Section Occurrence
+
+Place blocks once per section (16x16x16) at a specific offset within the section:
+
+```painter
+@section [.x=<offset>] [.y=<offset>] [.z=<offset>] {
+  // Blocks to place
+}
+```
+
+**Parameters:**
+- `.x` - X offset within section (0-15, default: 0)
+- `.y` - Y offset within section (0-15, default: 0)  
+- `.z` - Z offset within section (0-15, default: 0)
+
+**Examples:**
+```painter
+// Place a tree at the center of each section (8, *, 8)
+@section .x=8 .z=8 {
+  [0 0 0] oak_log
+  [0 1 0] oak_log
+  [0 2 0] oak_log
+  [-1 3 0] oak_leaves
+  [0 3 0] oak_leaves
+  [1 3 0] oak_leaves
+}
+
+// Place a beacon at specific section coordinates
+@section .x=5 .y=10 .z=7 {
+  [0 0 0] beacon
+}
+
+// Place at section origin (0, 0, 0)
+@section {
+  [0 0 0] bedrock
+}
+```
+
+**Use Cases:**
+- Section markers/landmarks
+- Regular structure placement
+- Chunk-aligned features
+- Debug visualization
 
 ### Noise Occurrence
 

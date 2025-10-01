@@ -262,10 +262,45 @@ static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *a
   }
 }
 
+// @section [.x=<val>] [.y=<val>] [.z=<val>]
+// Triggers once per section at the specified offset within the section
+// Offsets default to 0 if not provided
+// Sections are 16x16x16 blocks
+static void occurrence_section(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
+    OccurrenceRuntime *runtime) {
+  if (!runtime || !runtime->run_body || !body || body->count == 0) {
+    return;
+  }
+
+  // Get optional named arguments: .x, .y, .z for offsets within the section
+  Expression *offset_x_expr = named_arg_get(args, "x");
+  Expression *offset_y_expr = named_arg_get(args, "y");
+  Expression *offset_z_expr = named_arg_get(args, "z");
+
+  int offset_x = offset_x_expr ? (int)llround(painter_evaluate_expression(offset_x_expr, state)) : 0;
+  int offset_y = offset_y_expr ? (int)llround(painter_evaluate_expression(offset_y_expr, state)) : 0;
+  int offset_z = offset_z_expr ? (int)llround(painter_evaluate_expression(offset_z_expr, state)) : 0;
+
+  // Validate offsets are within section bounds (0-15)
+  if (offset_x < 0 || offset_x > 15 || offset_y < 0 || offset_y > 15 || offset_z < 0 || offset_z > 15) {
+    return; // Invalid offsets
+  }
+
+  // Calculate the world position for this section occurrence
+  // Section coordinates are the base coordinates of the current section
+  const int anchor_x = runtime->base_x + offset_x;
+  const int anchor_y = runtime->base_y + offset_y;
+  const int anchor_z = runtime->base_z + offset_z;
+
+  // Execute the body once at the calculated position
+  runtime->run_body(runtime->userdata, body, anchor_x, anchor_y, anchor_z);
+}
+
 const BuiltinOccurrence BUILTIN_OCCURRENCES[] = {
     {"every", occurrence_every},
     {"noise", occurrence_noise},
     {"noise3d", occurrence_noise3d},
+    {"section", occurrence_section},
 };
 
 const size_t BUILTIN_OCCURRENCE_COUNT = sizeof(BUILTIN_OCCURRENCES) / sizeof(BuiltinOccurrence);
