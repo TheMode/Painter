@@ -86,6 +86,12 @@ static bool palette_entry_list_push(Parser *parser, PaletteEntryList *list, Pale
   return true;
 }
 
+static int palette_entry_compare(const void *a, const void *b) {
+  const PaletteEntry *entry_a = (const PaletteEntry *)a;
+  const PaletteEntry *entry_b = (const PaletteEntry *)b;
+  return entry_a->key - entry_b->key;
+}
+
 static bool program_ensure_capacity(Parser *parser, Program *program) {
   if (program->instruction_count < program->instruction_capacity) {
     return true;
@@ -874,6 +880,10 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
 
     PaletteEntry entry = {0};
     entry.key = atoi(key_token.value);
+    if (entry.key < 0) {
+      parser_error(parser, "Palette index must be non-negative");
+      break;
+    }
     next();
 
     if (!expect_token(parser, TOKEN_COLON, "Expected ':' after palette key")) {
@@ -915,6 +925,21 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
 
     // Optional comma or newline
     consume(TOKEN_COMMA);
+  }
+
+  if (!parser->has_error && palette.entries.count > 0) {
+    if (palette.entries.count > 1) {
+      qsort(palette.entries.items, palette.entries.count, sizeof(PaletteEntry), palette_entry_compare);
+    }
+
+    for (size_t i = 0; i < palette.entries.count; i++) {
+      PaletteEntry *entry = &palette.entries.items[i];
+      if (entry->key != (int)i) {
+        parser_error(parser, "Palette indices must be contiguous starting at 0");
+        break;
+      }
+      entry->key = (int)i;
+    }
   }
 
   if (!expect_token(parser, TOKEN_RIGHT_BRACE, "Expected '}' after palette definition")) {
@@ -1475,6 +1500,75 @@ static int calculate_bits_per_entry(int palette_size) {
   return bits;
 }
 
+static bool ensure_runtime_palette_capacity(ExecutionState *state, size_t required_capacity) {
+  if (!state || !state->palette || !state->palette_capacity) {
+    return false;
+  }
+
+  int required = (int)required_capacity;
+  if (*state->palette_capacity >= required) {
+    return true;
+  }
+
+  int new_capacity = *state->palette_capacity;
+  if (new_capacity <= 0) {
+    new_capacity = 8;
+  }
+
+  while (new_capacity < required) {
+    new_capacity *= 2;
+  }
+
+  char **resized = realloc(*state->palette, sizeof(char *) * new_capacity);
+  if (!resized) {
+    return false;
+  }
+
+  *state->palette = resized;
+  *state->palette_capacity = new_capacity;
+  return true;
+}
+
+static void clear_runtime_palette(ExecutionState *state) {
+  if (!state || !state->palette || !state->palette_size) {
+    return;
+  }
+
+  for (int i = 0; i < *state->palette_size; i++) {
+    free((*state->palette)[i]);
+    (*state->palette)[i] = NULL;
+  }
+  *state->palette_size = 0;
+}
+
+static void apply_palette_definition(ExecutionState *state, const PaletteDefinition *definition) {
+  if (!state || !definition) {
+    return;
+  }
+
+  clear_runtime_palette(state);
+
+  if (!ensure_runtime_palette_capacity(state, definition->entries.count)) {
+    return;
+  }
+
+  for (size_t i = 0; i < definition->entries.count; i++) {
+    const PaletteEntry *entry = &definition->entries.items[i];
+    char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
+    painter_format_block(block_string, sizeof(block_string), entry->block_name, entry->block_properties);
+
+    size_t length = strlen(block_string);
+    char *copy = malloc(length + 1);
+    if (!copy) {
+      return;
+    }
+    memcpy(copy, block_string, length + 1);
+
+    (*state->palette)[i] = copy;
+    *state->palette_size = (int)(i + 1);
+  }
+}
+
 // Helper function to find or add a block to the palette
 int painter_palette_get_or_add(ExecutionState *state, const char *block_string) {
   if (!state || !state->palette || !state->palette_size || !state->palette_capacity || !block_string) {
@@ -1694,7 +1788,7 @@ static void process_instruction(Instruction *instr, ExecutionState *state, int o
   }
 
   case INSTR_PALETTE_DEFINITION:
-    // TODO: Implement palette definition handling
+    apply_palette_definition(state, &instr->palette_definition);
     break;
   }
 }
