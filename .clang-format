@@ -1,0 +1,45 @@
+---
+BasedOnStyle: LLVM
+Language: Cpp
+
+# Keep things compact and avoid unnecessary newlines
+ColumnLimit: 140
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+
+BreakBeforeBraces: Attach
+AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortLambdasOnASingleLine: All
+CompactNamespaces: true
+
+# Prefer keeping arguments/params on one line if they fit
+BinPackArguments: true
+BinPackParameters: true
+AlignAfterOpenBracket: DontAlign
+
+# Discourage breaks
+PenaltyBreakBeforeFirstCallParameter: 0
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 100
+PenaltyReturnTypeOnItsOwnLine: 0
+PenaltyBreakAssignment: 25
+
+# Do not reflow comments (prevents extra wrapping)
+ReflowComments: false
+
+# Spaces and parens
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: false
+SpacesBeforeTrailingComments: 1
+
+# Braced lists - format {0} instead of { 0 }
+Cpp11BracedListStyle: true
+SpaceBeforeCpp11BracedList: false
+---

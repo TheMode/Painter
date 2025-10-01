@@ -2,9 +2,7 @@
 
 #include <math.h>
 
-static void compute_iteration_bounds(int origin, int step,
-                                      int range_min, int range_max,
-                                      int *start, int *end) {
+static void compute_iteration_bounds(int origin, int step, int range_min, int range_max, int *start, int *end) {
   if (!start || !end) {
     return;
   }
@@ -32,10 +30,8 @@ static void compute_iteration_bounds(int origin, int step,
   }
 }
 
-static void occurrence_every(const double *args, size_t arg_count,
-                             const InstructionList *body,
-                             int origin_x, int origin_y, int origin_z,
-                             OccurrenceRuntime *runtime) {
+static void occurrence_every(const double *args, size_t arg_count, const InstructionList *body, int origin_x, int origin_y, int origin_z,
+    OccurrenceRuntime *runtime) {
   if (!runtime || !runtime->run_body || !body || body->count == 0 || arg_count < 3) {
     return;
   }
@@ -82,8 +78,6 @@ void register_builtin_occurrences(OccurrenceTypeRegistry *registry) {
   }
 
   for (size_t i = 0; i < BUILTIN_OCCURRENCE_COUNT; i++) {
-    occurrence_type_registry_register(registry,
-                                      BUILTIN_OCCURRENCES[i].name,
-                                      BUILTIN_OCCURRENCES[i].generator);
+    occurrence_type_registry_register(registry, BUILTIN_OCCURRENCES[i].name, BUILTIN_OCCURRENCES[i].generator);
   }
 }

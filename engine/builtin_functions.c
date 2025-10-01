@@ -110,10 +110,7 @@ void register_builtin_functions(FunctionRegistry *registry) {
   }
 
   for (size_t i = 0; i < BUILTIN_FUNCTION_COUNT; i++) {
-    function_registry_register(registry,
-                               BUILTIN_FUNCTIONS[i].name,
-                               BUILTIN_FUNCTIONS[i].min_args,
-                               BUILTIN_FUNCTIONS[i].max_args,
-                               BUILTIN_FUNCTIONS[i].function);
+    function_registry_register(
+        registry, BUILTIN_FUNCTIONS[i].name, BUILTIN_FUNCTIONS[i].min_args, BUILTIN_FUNCTIONS[i].max_args, BUILTIN_FUNCTIONS[i].function);
   }
 }

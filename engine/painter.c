@@ -1,18 +1,17 @@
 #include "painter.h"
-#include "builtin_macros.h"
 #include "builtin_functions.h"
+#include "builtin_macros.h"
 #include "builtin_occurrences.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
 
 // -----------------------------------------------------------------------------
 // Internal utility helpers
 // -----------------------------------------------------------------------------
 
-static bool ensure_capacity(Parser *parser, void **buffer, size_t *capacity,
-                            size_t count, size_t element_size) {
+static bool ensure_capacity(Parser *parser, void **buffer, size_t *capacity, size_t count, size_t element_size) {
   if (*capacity > count) {
     return true;
   }
@@ -56,8 +55,7 @@ static inline void palette_entry_list_reset(PaletteEntryList *list) {
 }
 
 static bool instruction_list_push(Parser *parser, InstructionList *list, Instruction *instr) {
-  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
-                       list->count, sizeof(*list->items))) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity, list->count, sizeof(*list->items))) {
     return false;
   }
   list->items[list->count++] = instr;
@@ -65,8 +63,7 @@ static bool instruction_list_push(Parser *parser, InstructionList *list, Instruc
 }
 
 static bool expression_list_push(Parser *parser, ExpressionList *list, Expression *expr) {
-  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
-                       list->count, sizeof(*list->items))) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity, list->count, sizeof(*list->items))) {
     return false;
   }
   list->items[list->count++] = expr;
@@ -74,8 +71,7 @@ static bool expression_list_push(Parser *parser, ExpressionList *list, Expressio
 }
 
 static bool macro_argument_list_push(Parser *parser, MacroArgumentList *list, MacroArgument argument) {
-  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
-                       list->count, sizeof(*list->items))) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity, list->count, sizeof(*list->items))) {
     return false;
   }
   list->items[list->count++] = argument;
@@ -83,8 +79,7 @@ static bool macro_argument_list_push(Parser *parser, MacroArgumentList *list, Ma
 }
 
 static bool palette_entry_list_push(Parser *parser, PaletteEntryList *list, PaletteEntry entry) {
-  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity,
-                       list->count, sizeof(*list->items))) {
+  if (!ensure_capacity(parser, (void **)&list->items, &list->capacity, list->count, sizeof(*list->items))) {
     return false;
   }
   list->items[list->count++] = entry;
@@ -220,13 +215,13 @@ static Expression *parse_primary(Parser *parser) {
   if (peek_type() == TOKEN_MINUS || peek_type() == TOKEN_PLUS) {
     bool is_minus = peek_type() == TOKEN_MINUS;
     consume(is_minus ? TOKEN_MINUS : TOKEN_PLUS);
-    
+
     Expression *operand = parse_primary(parser);
     if (!operand) return NULL;
-    
+
     // Plus is a no-op, just return the operand
     if (!is_minus) return operand;
-    
+
     Expression *unary = make_unary_op(OP_NEGATE, operand);
     if (!unary) {
       parser_error(parser, "Out of memory");
@@ -234,7 +229,7 @@ static Expression *parse_primary(Parser *parser) {
     }
     return unary;
   }
-  
+
   // Handle @function(...) syntax
   if (consume(TOKEN_AT)) {
     Token name_token = peek();
@@ -260,7 +255,7 @@ static Expression *parse_primary(Parser *parser) {
   // Handle identifiers and function calls
   if (peek_type() == TOKEN_IDENTIFIER) {
     Token token = next();
-    
+
     if (consume(TOKEN_LEFT_PAREN)) {
       return parse_function_call(parser, token.value);
     }
@@ -296,10 +291,14 @@ static Expression *parse_multiplicative(Parser *parser) {
 
   while (peek_type() == TOKEN_STAR || peek_type() == TOKEN_SLASH || peek_type() == TOKEN_MODULO) {
     BinaryOperator op;
-    if (consume(TOKEN_STAR)) op = OP_MULTIPLY;
-    else if (consume(TOKEN_SLASH)) op = OP_DIVIDE;
-    else if (consume(TOKEN_MODULO)) op = OP_MODULO;
-    else break;
+    if (consume(TOKEN_STAR))
+      op = OP_MULTIPLY;
+    else if (consume(TOKEN_SLASH))
+      op = OP_DIVIDE;
+    else if (consume(TOKEN_MODULO))
+      op = OP_MODULO;
+    else
+      break;
 
     Expression *right = parse_primary(parser);
     if (!right) {
@@ -352,18 +351,24 @@ static Expression *parse_comparison(Parser *parser) {
   if (!left) return NULL;
 
   TokenType type = peek_type();
-  if (type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL ||
-      type == TOKEN_LEFT_ANGLE || type == TOKEN_LESS_EQUAL ||
+  if (type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL || type == TOKEN_LEFT_ANGLE || type == TOKEN_LESS_EQUAL ||
       type == TOKEN_RIGHT_ANGLE || type == TOKEN_GREATER_EQUAL) {
-    
+
     BinaryOperator op;
-    if (consume(TOKEN_EQUAL_EQUAL)) op = OP_EQUAL;
-    else if (consume(TOKEN_NOT_EQUAL)) op = OP_NOT_EQUAL;
-    else if (consume(TOKEN_LEFT_ANGLE)) op = OP_LESS;
-    else if (consume(TOKEN_LESS_EQUAL)) op = OP_LESS_EQUAL;
-    else if (consume(TOKEN_RIGHT_ANGLE)) op = OP_GREATER;
-    else if (consume(TOKEN_GREATER_EQUAL)) op = OP_GREATER_EQUAL;
-    else return left;
+    if (consume(TOKEN_EQUAL_EQUAL))
+      op = OP_EQUAL;
+    else if (consume(TOKEN_NOT_EQUAL))
+      op = OP_NOT_EQUAL;
+    else if (consume(TOKEN_LEFT_ANGLE))
+      op = OP_LESS;
+    else if (consume(TOKEN_LESS_EQUAL))
+      op = OP_LESS_EQUAL;
+    else if (consume(TOKEN_RIGHT_ANGLE))
+      op = OP_GREATER;
+    else if (consume(TOKEN_GREATER_EQUAL))
+      op = OP_GREATER_EQUAL;
+    else
+      return left;
 
     Expression *right = parse_additive(parser);
     if (!right) {
@@ -384,19 +389,17 @@ static Expression *parse_comparison(Parser *parser) {
   return left;
 }
 
-static Expression *parse_expression(Parser *parser) {
-  return parse_comparison(parser);
-}
+static Expression *parse_expression(Parser *parser) { return parse_comparison(parser); }
 
 static Expression *parse_coordinate(Parser *parser) {
   // Expects [ is already consumed
   Expression *coord = alloc_or_error(parser, sizeof(Expression), "Out of memory");
   if (!coord) return NULL;
-  
+
   coord->type = EXPR_COORDINATE;
   coord->coordinate.y = NULL;
   coord->coordinate.z = NULL;
-  
+
   // Parse first value (always x)
   coord->coordinate.x = parse_expression(parser);
   if (!coord->coordinate.x) goto error;
@@ -471,15 +474,15 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
   }
 
   return expr;
-}// Instruction parsing
+} // Instruction parsing
 static BlockPlacement parse_block_placement(Parser *parser) {
   BlockPlacement placement = {0};
-  
+
   // Consume the opening [
   if (!expect_token(parser, TOKEN_LEFT_BRACKET, "Expected '[' for coordinate")) {
     return placement;
   }
-  
+
   placement.coordinate = parse_coordinate(parser);
   if (!placement.coordinate) return placement;
 
@@ -505,9 +508,7 @@ static BlockPlacement parse_block_placement(Parser *parser) {
     size_t current_len = strlen(placement.block_name);
     if (current_len < MAX_TOKEN_VALUE_LENGTH - 1) {
       placement.block_name[current_len] = ':';
-      strncpy(placement.block_name + current_len + 1, 
-              ns_token.value, 
-              MAX_TOKEN_VALUE_LENGTH - current_len - 2);
+      strncpy(placement.block_name + current_len + 1, ns_token.value, MAX_TOKEN_VALUE_LENGTH - current_len - 2);
       placement.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     }
     next();
@@ -542,9 +543,9 @@ static BlockPlacement parse_block_placement(Parser *parser) {
 static ForLoop parse_for_loop(Parser *parser) {
   ForLoop loop = {0};
   instruction_list_reset(&loop.body);
-  
+
   // 'for' keyword is already consumed by caller
-  
+
   Token var_token = peek();
   if (var_token.type != TOKEN_IDENTIFIER) {
     parser_error(parser, "Expected loop variable name");
@@ -620,11 +621,11 @@ static IfStatement parse_if_statement(Parser *parser) {
 
     ConditionalBranch *branch = &if_stmt.branches[if_stmt.branch_count];
     instruction_list_reset(&branch->body);
-    
+
     // Check if this is an 'else' branch (no condition)
     if (if_stmt.branch_count > 0 && consume_keyword("else")) {
       branch->condition = NULL;
-      
+
       // Check if this is 'else' without 'if' (final else)
       if (!consume_keyword("if")) {
         // Final else branch - must have body
@@ -693,7 +694,7 @@ static IfStatement parse_if_statement(Parser *parser) {
     if (next_tok.type != TOKEN_IDENTIFIER) {
       break; // No more branches
     }
-    
+
     if (strcmp(next_tok.value, "elif") == 0) {
       next(); // Consume 'elif'
       // Continue loop to parse elif as a new branch with condition
@@ -737,8 +738,7 @@ static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
   }
 
   TokenType type = peek_type();
-  if (type == TOKEN_RIGHT_ANGLE || type == TOKEN_LEFT_ANGLE ||
-      type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL ||
+  if (type == TOKEN_RIGHT_ANGLE || type == TOKEN_LEFT_ANGLE || type == TOKEN_EQUAL_EQUAL || type == TOKEN_NOT_EQUAL ||
       type == TOKEN_GREATER_EQUAL || type == TOKEN_LESS_EQUAL) {
     occurrence->condition = parse_expression(parser);
     if (!occurrence->condition) {
@@ -858,7 +858,7 @@ static Occurrence parse_occurrence_reference(Parser *parser, const char *name) {
 static PaletteDefinition parse_palette_definition(Parser *parser) {
   PaletteDefinition palette = {0};
   palette_entry_list_reset(&palette.entries);
-  
+
   // Name is already parsed in assignment
   if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' for palette definition")) {
     return palette;
@@ -898,7 +898,7 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
       while (peek_type() != TOKEN_RIGHT_BRACKET && peek_type() != TOKEN_EOF) {
         Token prop_token = next();
         size_t token_len = strlen(prop_token.value);
-        
+
         if (offset + token_len < MAX_TOKEN_VALUE_LENGTH - 1) {
           strcpy(entry.block_properties + offset, prop_token.value);
           offset += token_len;
@@ -927,21 +927,21 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
 static MacroCall parse_macro_call(Parser *parser) {
   MacroCall macro = {0};
   macro_argument_list_reset(&macro.arguments);
-  
+
   // Consume '#'
   next();
-  
+
   // Parse macro name
   Token name_token = peek();
   if (name_token.type != TOKEN_IDENTIFIER) {
     parser_error(parser, "Expected macro name after '#'");
     return macro;
   }
-  
+
   strncpy(macro.name, name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
   macro.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   next();
-  
+
   // Parse arguments (.name=value)
   while (consume(TOKEN_DOT)) {
     Token arg_name_token = peek();
@@ -949,16 +949,16 @@ static MacroCall parse_macro_call(Parser *parser) {
       parser_error(parser, "Expected argument name after '.'");
       return macro;
     }
-    
+
     MacroArgument arg = {0};
     strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
     arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     next();
-    
+
     if (!expect_token(parser, TOKEN_EQUAL, "Expected '=' after argument name")) {
       return macro;
     }
-    
+
     arg.value = parse_expression(parser);
     if (!arg.value) {
       return macro;
@@ -969,7 +969,7 @@ static MacroCall parse_macro_call(Parser *parser) {
       return macro;
     }
   }
-  
+
   return macro;
 }
 
@@ -1127,26 +1127,23 @@ void expression_free(Expression *expr) {
   if (!expr) return;
 
   switch (expr->type) {
-    case EXPR_BINARY_OP:
-      expression_free(expr->binary.left);
-      expression_free(expr->binary.right);
-      break;
-    case EXPR_UNARY_OP:
-      expression_free(expr->unary.operand);
-      break;
-    case EXPR_COORDINATE:
-      expression_free(expr->coordinate.x);
-      expression_free(expr->coordinate.y);
-      expression_free(expr->coordinate.z);
-      break;
-    case EXPR_FUNCTION_CALL:
-      for (size_t i = 0; i < expr->function_call.args.count; i++) {
-        expression_free(expr->function_call.args.items[i]);
-      }
-      free(expr->function_call.args.items);
-      break;
-    default:
-      break;
+  case EXPR_BINARY_OP:
+    expression_free(expr->binary.left);
+    expression_free(expr->binary.right);
+    break;
+  case EXPR_UNARY_OP: expression_free(expr->unary.operand); break;
+  case EXPR_COORDINATE:
+    expression_free(expr->coordinate.x);
+    expression_free(expr->coordinate.y);
+    expression_free(expr->coordinate.z);
+    break;
+  case EXPR_FUNCTION_CALL:
+    for (size_t i = 0; i < expr->function_call.args.count; i++) {
+      expression_free(expr->function_call.args.items[i]);
+    }
+    free(expr->function_call.args.items);
+    break;
+  default: break;
   }
 
   free(expr);
@@ -1156,51 +1153,45 @@ void instruction_free(Instruction *instr) {
   if (!instr) return;
 
   switch (instr->type) {
-    case INSTR_BLOCK_PLACEMENT:
-      expression_free(instr->block_placement.coordinate);
-      break;
-    case INSTR_ASSIGNMENT:
-      expression_free(instr->assignment.value);
-      break;
-    case INSTR_FOR_LOOP:
-      expression_free(instr->for_loop.start);
-      expression_free(instr->for_loop.end);
-      for (size_t i = 0; i < instr->for_loop.body.count; i++) {
-        instruction_free(instr->for_loop.body.items[i]);
+  case INSTR_BLOCK_PLACEMENT: expression_free(instr->block_placement.coordinate); break;
+  case INSTR_ASSIGNMENT: expression_free(instr->assignment.value); break;
+  case INSTR_FOR_LOOP:
+    expression_free(instr->for_loop.start);
+    expression_free(instr->for_loop.end);
+    for (size_t i = 0; i < instr->for_loop.body.count; i++) {
+      instruction_free(instr->for_loop.body.items[i]);
+    }
+    free(instr->for_loop.body.items);
+    break;
+  case INSTR_IF_STATEMENT:
+    for (size_t i = 0; i < instr->if_statement.branch_count; i++) {
+      ConditionalBranch *branch = &instr->if_statement.branches[i];
+      expression_free(branch->condition);
+      for (size_t j = 0; j < branch->body.count; j++) {
+        instruction_free(branch->body.items[j]);
       }
-      free(instr->for_loop.body.items);
-      break;
-    case INSTR_IF_STATEMENT:
-      for (size_t i = 0; i < instr->if_statement.branch_count; i++) {
-        ConditionalBranch *branch = &instr->if_statement.branches[i];
-        expression_free(branch->condition);
-        for (size_t j = 0; j < branch->body.count; j++) {
-          instruction_free(branch->body.items[j]);
-        }
-        free(branch->body.items);
-      }
-      free(instr->if_statement.branches);
-      break;
-    case INSTR_OCCURRENCE:
-      for (size_t i = 0; i < instr->occurrence.args.count; i++) {
-        expression_free(instr->occurrence.args.items[i]);
-      }
-      free(instr->occurrence.args.items);
-      expression_free(instr->occurrence.condition);
-      for (size_t i = 0; i < instr->occurrence.body.count; i++) {
-        instruction_free(instr->occurrence.body.items[i]);
-      }
-      free(instr->occurrence.body.items);
-      break;
-    case INSTR_PALETTE_DEFINITION:
-      free(instr->palette_definition.entries.items);
-      break;
-    case INSTR_MACRO_CALL:
-      for (size_t i = 0; i < instr->macro_call.arguments.count; i++) {
-        expression_free(instr->macro_call.arguments.items[i].value);
-      }
-      free(instr->macro_call.arguments.items);
-      break;
+      free(branch->body.items);
+    }
+    free(instr->if_statement.branches);
+    break;
+  case INSTR_OCCURRENCE:
+    for (size_t i = 0; i < instr->occurrence.args.count; i++) {
+      expression_free(instr->occurrence.args.items[i]);
+    }
+    free(instr->occurrence.args.items);
+    expression_free(instr->occurrence.condition);
+    for (size_t i = 0; i < instr->occurrence.body.count; i++) {
+      instruction_free(instr->occurrence.body.items[i]);
+    }
+    free(instr->occurrence.body.items);
+    break;
+  case INSTR_PALETTE_DEFINITION: free(instr->palette_definition.entries.items); break;
+  case INSTR_MACRO_CALL:
+    for (size_t i = 0; i < instr->macro_call.arguments.count; i++) {
+      expression_free(instr->macro_call.arguments.items[i].value);
+    }
+    free(instr->macro_call.arguments.items);
+    break;
   }
 
   free(instr);
@@ -1224,11 +1215,10 @@ void macro_registry_init(MacroRegistry *registry) {
 }
 
 void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator) {
-  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
-                       registry->entry_count, sizeof(*registry->entries))) {
+  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity, registry->entry_count, sizeof(*registry->entries))) {
     return;
   }
-  
+
   MacroRegistryEntry *entry = &registry->entries[registry->entry_count++];
   strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
@@ -1286,16 +1276,14 @@ OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry
   return NULL;
 }
 
-bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type,
-                             const double *args, size_t arg_count) {
+bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const double *args, size_t arg_count) {
   if (!registry || !name || !type) {
     return false;
   }
 
   OccurrenceRegistryEntry *entry = occurrence_registry_lookup(registry, name);
   if (!entry) {
-    if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
-                         registry->entry_count, sizeof(*registry->entries))) {
+    if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity, registry->entry_count, sizeof(*registry->entries))) {
       return false;
     }
 
@@ -1343,14 +1331,12 @@ void occurrence_type_registry_free(OccurrenceTypeRegistry *registry) {
   registry->entry_capacity = 0;
 }
 
-void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name,
-                                       OccurrenceGenerator generator) {
+void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name, OccurrenceGenerator generator) {
   if (!registry || !name || !generator) {
     return;
   }
 
-  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
-                       registry->entry_count, sizeof(*registry->entries))) {
+  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity, registry->entry_count, sizeof(*registry->entries))) {
     return;
   }
 
@@ -1381,15 +1367,12 @@ void function_registry_init(FunctionRegistry *registry) {
   registry->entry_capacity = 0;
 }
 
-bool function_registry_register(FunctionRegistry *registry, const char *name,
-                                size_t min_args, size_t max_args,
-                                BuiltinFunction function) {
+bool function_registry_register(FunctionRegistry *registry, const char *name, size_t min_args, size_t max_args, BuiltinFunction function) {
   if (!registry || !name || !function) {
     return false;
   }
 
-  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity,
-                       registry->entry_count, sizeof(*registry->entries))) {
+  if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity, registry->entry_count, sizeof(*registry->entries))) {
     return false;
   }
 
@@ -1402,8 +1385,7 @@ bool function_registry_register(FunctionRegistry *registry, const char *name,
   return true;
 }
 
-const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry,
-                                                      const char *name) {
+const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry, const char *name) {
   if (!registry || !name) {
     return NULL;
   }
@@ -1446,13 +1428,12 @@ void context_set(VariableContext *ctx, const char *name, double value) {
       return;
     }
   }
-  
+
   // Add new variable
-  if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity,
-                       ctx->variable_count, sizeof(*ctx->variables))) {
+  if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity, ctx->variable_count, sizeof(*ctx->variables))) {
     return;
   }
-  
+
   Variable *variable = &ctx->variables[ctx->variable_count++];
   strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   variable->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
@@ -1482,7 +1463,7 @@ Expression *macro_get_arg(const MacroArgumentList *args, const char *name) {
 // Helper function to calculate bits per entry based on palette size
 static int calculate_bits_per_entry(int palette_size) {
   if (palette_size <= 1) return 0;
-  
+
   // Calculate the minimum number of bits needed to represent (palette_size - 1)
   // This is equivalent to floor(log2(palette_size - 1)) + 1
   int bits = 0;
@@ -1495,26 +1476,25 @@ static int calculate_bits_per_entry(int palette_size) {
 }
 
 // Helper function to find or add a block to the palette
-int painter_palette_get_or_add(char ***palette, int *palette_size, int *palette_capacity,
-                               const char *block_string) {
-  if (!palette || !palette_size || !palette_capacity || !block_string) {
+int painter_palette_get_or_add(ExecutionState *state, const char *block_string) {
+  if (!state || !state->palette || !state->palette_size || !state->palette_capacity || !block_string) {
     return -1;
   }
 
-  for (int i = 0; i < *palette_size; i++) {
-    if (strcmp((*palette)[i], block_string) == 0) {
+  for (int i = 0; i < *state->palette_size; i++) {
+    if (strcmp((*state->palette)[i], block_string) == 0) {
       return i;
     }
   }
 
-  if (*palette_capacity <= *palette_size) {
-    int new_capacity = (*palette_capacity == 0) ? 8 : (*palette_capacity * 2);
-    char **resized = realloc(*palette, sizeof(char *) * new_capacity);
+  if (*state->palette_capacity <= *state->palette_size) {
+    int new_capacity = (*state->palette_capacity == 0) ? 8 : (*state->palette_capacity * 2);
+    char **resized = realloc(*state->palette, sizeof(char *) * new_capacity);
     if (!resized) {
       return -1;
     }
-    *palette = resized;
-    *palette_capacity = new_capacity;
+    *state->palette = resized;
+    *state->palette_capacity = new_capacity;
   }
 
   char *copy = malloc(strlen(block_string) + 1);
@@ -1523,8 +1503,8 @@ int painter_palette_get_or_add(char ***palette, int *palette_size, int *palette_
   }
   strcpy(copy, block_string);
 
-  (*palette)[*palette_size] = copy;
-  return (*palette_size)++;
+  (*state->palette)[*state->palette_size] = copy;
+  return (*state->palette_size)++;
 }
 
 // Helper function to create a full block string (name + properties)
@@ -1538,227 +1518,188 @@ void painter_format_block(char *buffer, size_t buffer_size, const char *block_na
 }
 
 // Helper function to evaluate an expression to a number
-double painter_evaluate_expression(const Expression *expr, VariableContext *ctx,
-                                   FunctionRegistry *function_registry) {
-  if (!expr) return 0.0;
+double painter_evaluate_expression(const Expression *expr, ExecutionState *state) {
+  if (!expr || !state) return 0.0;
 
   switch (expr->type) {
-    case EXPR_NUMBER:
-      return expr->number;
-    case EXPR_IDENTIFIER:
-      return context_get(ctx, expr->identifier);
-    case EXPR_BINARY_OP: {
-      double left = painter_evaluate_expression(expr->binary.left, ctx, function_registry);
-      double right = painter_evaluate_expression(expr->binary.right, ctx, function_registry);
-      switch (expr->binary.op) {
-        case OP_ADD: return left + right;
-        case OP_SUBTRACT: return left - right;
-        case OP_MULTIPLY: return left * right;
-        case OP_DIVIDE: return (right != 0.0) ? left / right : 0.0;
-        case OP_MODULO: return (int)left % (int)right;
-        case OP_EQUAL: return left == right;
-        case OP_NOT_EQUAL: return left != right;
-        case OP_LESS: return left < right;
-        case OP_LESS_EQUAL: return left <= right;
-        case OP_GREATER: return left > right;
-        case OP_GREATER_EQUAL: return left >= right;
-      }
-      break;
+  case EXPR_NUMBER: return expr->number;
+  case EXPR_IDENTIFIER: return context_get(state->variables, expr->identifier);
+  case EXPR_BINARY_OP: {
+    double left = painter_evaluate_expression(expr->binary.left, state);
+    double right = painter_evaluate_expression(expr->binary.right, state);
+    switch (expr->binary.op) {
+    case OP_ADD: return left + right;
+    case OP_SUBTRACT: return left - right;
+    case OP_MULTIPLY: return left * right;
+    case OP_DIVIDE: return (right != 0.0) ? left / right : 0.0;
+    case OP_MODULO: return (int)left % (int)right;
+    case OP_EQUAL: return left == right;
+    case OP_NOT_EQUAL: return left != right;
+    case OP_LESS: return left < right;
+    case OP_LESS_EQUAL: return left <= right;
+    case OP_GREATER: return left > right;
+    case OP_GREATER_EQUAL: return left >= right;
     }
-    case EXPR_UNARY_OP: {
-      double operand = painter_evaluate_expression(expr->unary.operand, ctx, function_registry);
-      switch (expr->unary.op) {
-        case OP_NEGATE: return -operand;
-      }
-      break;
+    break;
+  }
+  case EXPR_UNARY_OP: {
+    double operand = painter_evaluate_expression(expr->unary.operand, state);
+    switch (expr->unary.op) {
+    case OP_NEGATE: return -operand;
     }
-    case EXPR_FUNCTION_CALL: {
-      if (!function_registry) {
-        return 0.0;
-      }
-
-      const FunctionRegistryEntry *entry =
-          function_registry_lookup(function_registry, expr->function_call.name);
-      if (!entry) {
-        return 0.0;
-      }
-
-      size_t arg_count = expr->function_call.args.count;
-      if (arg_count < entry->min_args) {
-        return 0.0;
-      }
-      if (entry->max_args != SIZE_MAX && arg_count > entry->max_args) {
-        return 0.0;
-      }
-
-      double *arg_values = NULL;
-      if (arg_count > 0) {
-        arg_values = malloc(sizeof(double) * arg_count);
-        if (!arg_values) {
-          return 0.0;
-        }
-        for (size_t i = 0; i < arg_count; i++) {
-          arg_values[i] = painter_evaluate_expression(expr->function_call.args.items[i],
-                                                      ctx, function_registry);
-        }
-      }
-
-      double result = entry->function ? entry->function(arg_values, arg_count) : 0.0;
-      free(arg_values);
-      return result;
+    break;
+  }
+  case EXPR_FUNCTION_CALL: {
+    if (!state->functions) {
+      return 0.0;
     }
-    case EXPR_COORDINATE:
-      break;
+
+    const FunctionRegistryEntry *entry = function_registry_lookup(state->functions, expr->function_call.name);
+    if (!entry) {
+      return 0.0;
+    }
+
+    size_t arg_count = expr->function_call.args.count;
+    if (arg_count < entry->min_args) {
+      return 0.0;
+    }
+    if (entry->max_args != SIZE_MAX && arg_count > entry->max_args) {
+      return 0.0;
+    }
+
+    double *arg_values = NULL;
+    if (arg_count > 0) {
+      arg_values = malloc(sizeof(double) * arg_count);
+      if (!arg_values) {
+        return 0.0;
+      }
+      for (size_t i = 0; i < arg_count; i++) {
+        arg_values[i] = painter_evaluate_expression(expr->function_call.args.items[i], state);
+      }
+    }
+
+    double result = entry->function ? entry->function(arg_values, arg_count) : 0.0;
+    free(arg_values);
+    return result;
+  }
+  case EXPR_COORDINATE: break;
   }
 
   return 0.0;
 }
 
-typedef struct {
-  VariableContext *variables;
-  MacroRegistry *macros;
-  FunctionRegistry *functions;
-  OccurrenceRegistry *occurrences;
-  OccurrenceTypeRegistry *occurrence_types;
-  int base_x;
-  int base_y;
-  int base_z;
-  int *block_indices;
-  char ***palette;
-  int *palette_size;
-  int *palette_capacity;
-} ExecutionState;
-
 // Forward declaration for recursive processing
-static void process_instruction(Instruction *instr, ExecutionState *state,
-                                int origin_x, int origin_y, int origin_z);
-static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state,
-                                           int origin_x, int origin_y, int origin_z);
-
+static void process_instruction(Instruction *instr, ExecutionState *state, int origin_x, int origin_y, int origin_z);
+static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state, int origin_x, int origin_y, int origin_z);
 
 // Process a single instruction and its effects on the section
-static void process_instruction(Instruction *instr, ExecutionState *state,
-                                int origin_x, int origin_y, int origin_z) {
+static void process_instruction(Instruction *instr, ExecutionState *state, int origin_x, int origin_y, int origin_z) {
   if (!instr || !state) return;
 
   switch (instr->type) {
-    case INSTR_BLOCK_PLACEMENT: {
-      BlockPlacement *placement = &instr->block_placement;
+  case INSTR_BLOCK_PLACEMENT: {
+    BlockPlacement *placement = &instr->block_placement;
 
-      if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
-        int offset_x = (int)painter_evaluate_expression(
-            placement->coordinate->coordinate.x, state->variables, state->functions);
-        int offset_y = placement->coordinate->coordinate.y ?
-                        (int)painter_evaluate_expression(placement->coordinate->coordinate.y,
-                                                          state->variables, state->functions) : 0;
-        int offset_z = placement->coordinate->coordinate.z ?
-                        (int)painter_evaluate_expression(placement->coordinate->coordinate.z,
-                                                          state->variables, state->functions) : 0;
+    if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
+      int offset_x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, state);
+      int offset_y = placement->coordinate->coordinate.y ? (int)painter_evaluate_expression(placement->coordinate->coordinate.y, state) : 0;
+      int offset_z = placement->coordinate->coordinate.z ? (int)painter_evaluate_expression(placement->coordinate->coordinate.z, state) : 0;
 
-        int world_x = origin_x + offset_x;
-        int world_y = origin_y + offset_y;
-        int world_z = origin_z + offset_z;
+      int world_x = origin_x + offset_x;
+      int world_y = origin_y + offset_y;
+      int world_z = origin_z + offset_z;
 
-        if (world_x >= state->base_x && world_x < state->base_x + 16 &&
-            world_y >= state->base_y && world_y < state->base_y + 16 &&
-            world_z >= state->base_z && world_z < state->base_z + 16) {
+      if (world_x >= state->base_x && world_x < state->base_x + 16 && world_y >= state->base_y && world_y < state->base_y + 16 &&
+          world_z >= state->base_z && world_z < state->base_z + 16) {
 
-          int local_x = world_x - state->base_x;
-          int local_y = world_y - state->base_y;
-          int local_z = world_z - state->base_z;
-          int block_index = local_y * 256 + local_z * 16 + local_x;
+        int local_x = world_x - state->base_x;
+        int local_y = world_y - state->base_y;
+        int local_z = world_z - state->base_z;
+        int block_index = local_y * 256 + local_z * 16 + local_x;
 
-          char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
-          painter_format_block(block_string, sizeof(block_string),
-                               placement->block_name, placement->block_properties);
+        char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
+        painter_format_block(block_string, sizeof(block_string), placement->block_name, placement->block_properties);
 
-          int palette_index = painter_palette_get_or_add(state->palette, state->palette_size,
-                                                         state->palette_capacity, block_string);
-          if (palette_index >= 0) {
-            state->block_indices[block_index] = palette_index;
-          }
+        int palette_index = painter_palette_get_or_add(state, block_string);
+        if (palette_index >= 0) {
+          state->block_indices[block_index] = palette_index;
         }
       }
-      break;
     }
+    break;
+  }
 
-    case INSTR_ASSIGNMENT: {
-      Assignment *assignment = &instr->assignment;
-      double value = painter_evaluate_expression(assignment->value, state->variables, state->functions);
-      context_set(state->variables, assignment->name, value);
-      break;
-    }
+  case INSTR_ASSIGNMENT: {
+    Assignment *assignment = &instr->assignment;
+    double value = painter_evaluate_expression(assignment->value, state);
+    context_set(state->variables, assignment->name, value);
+    break;
+  }
 
-    case INSTR_FOR_LOOP: {
-      ForLoop *loop = &instr->for_loop;
+  case INSTR_FOR_LOOP: {
+    ForLoop *loop = &instr->for_loop;
 
-      int start = (int)painter_evaluate_expression(loop->start, state->variables, state->functions);
-      int end = (int)painter_evaluate_expression(loop->end, state->variables, state->functions);
+    int start = (int)painter_evaluate_expression(loop->start, state);
+    int end = (int)painter_evaluate_expression(loop->end, state);
 
-      for (int i = start; i < end; i++) {
-        context_set(state->variables, loop->variable, (double)i);
+    for (int i = start; i < end; i++) {
+      context_set(state->variables, loop->variable, (double)i);
 
-        for (size_t j = 0; j < loop->body.count; j++) {
-          process_instruction(loop->body.items[j], state, origin_x, origin_y, origin_z);
-        }
+      for (size_t j = 0; j < loop->body.count; j++) {
+        process_instruction(loop->body.items[j], state, origin_x, origin_y, origin_z);
       }
-      break;
     }
+    break;
+  }
 
-    case INSTR_IF_STATEMENT: {
-      IfStatement *if_stmt = &instr->if_statement;
+  case INSTR_IF_STATEMENT: {
+    IfStatement *if_stmt = &instr->if_statement;
 
-      // Evaluate each branch in order
-      for (size_t i = 0; i < if_stmt->branch_count; i++) {
-        ConditionalBranch *branch = &if_stmt->branches[i];
-        
-        // If condition is NULL, this is an 'else' branch (always execute)
-        bool should_execute = (branch->condition == NULL);
-        
-        // Otherwise evaluate the condition
-        if (!should_execute) {
-          double condition_value = painter_evaluate_expression(branch->condition, 
-                                                              state->variables, 
-                                                              state->functions);
-          should_execute = (condition_value != 0.0); // non-zero is true
-        }
+    // Evaluate each branch in order
+    for (size_t i = 0; i < if_stmt->branch_count; i++) {
+      ConditionalBranch *branch = &if_stmt->branches[i];
 
-        if (should_execute) {
-          // Execute this branch and stop checking further branches
-          for (size_t j = 0; j < branch->body.count; j++) {
-            process_instruction(branch->body.items[j], state, origin_x, origin_y, origin_z);
-          }
-          break; // Don't check remaining elif/else branches
-        }
+      // If condition is NULL, this is an 'else' branch (always execute)
+      bool should_execute = (branch->condition == NULL);
+
+      // Otherwise evaluate the condition
+      if (!should_execute) {
+        double condition_value = painter_evaluate_expression(branch->condition, state);
+        should_execute = (condition_value != 0.0); // non-zero is true
       }
-      break;
-    }
 
-    case INSTR_MACRO_CALL: {
-      MacroCall *macro_call = &instr->macro_call;
-      MacroGenerator generator = macro_registry_lookup(state->macros, macro_call->name);
-      if (generator) {
-        generator(state->variables, &macro_call->arguments, state->functions,
-                  state->base_x, state->base_y, state->base_z,
-                  state->block_indices, state->palette,
-                  state->palette_size, state->palette_capacity);
+      if (should_execute) {
+        // Execute this branch and stop checking further branches
+        for (size_t j = 0; j < branch->body.count; j++) {
+          process_instruction(branch->body.items[j], state, origin_x, origin_y, origin_z);
+        }
+        break; // Don't check remaining elif/else branches
       }
-      break;
     }
+    break;
+  }
 
-    case INSTR_OCCURRENCE: {
-      execute_occurrence_instruction(&instr->occurrence, state, origin_x, origin_y, origin_z);
-      break;
+  case INSTR_MACRO_CALL: {
+    MacroCall *macro_call = &instr->macro_call;
+    MacroGenerator generator = macro_registry_lookup(state->macros, macro_call->name);
+    if (generator) {
+      generator(state, &macro_call->arguments);
     }
+    break;
+  }
 
-    case INSTR_PALETTE_DEFINITION:
-      // TODO: Implement palette definition handling
-      break;
+  case INSTR_OCCURRENCE: {
+    execute_occurrence_instruction(&instr->occurrence, state, origin_x, origin_y, origin_z);
+    break;
+  }
+
+  case INSTR_PALETTE_DEFINITION:
+    // TODO: Implement palette definition handling
+    break;
   }
 }
 
-static void occurrence_runtime_run_body(void *userdata, const InstructionList *body,
-                                        int anchor_x, int anchor_y, int anchor_z) {
+static void occurrence_runtime_run_body(void *userdata, const InstructionList *body, int anchor_x, int anchor_y, int anchor_z) {
   ExecutionState *state = (ExecutionState *)userdata;
   if (!state || !body) {
     return;
@@ -1769,9 +1710,8 @@ static void occurrence_runtime_run_body(void *userdata, const InstructionList *b
   }
 }
 
-static void execute_occurrence_by_type(const char *type, const double *args, size_t arg_count,
-                                       const InstructionList *body, ExecutionState *state,
-                                       int origin_x, int origin_y, int origin_z) {
+static void execute_occurrence_by_type(const char *type, const double *args, size_t arg_count, const InstructionList *body,
+    ExecutionState *state, int origin_x, int origin_y, int origin_z) {
   if (!type || !state || !state->occurrence_types) {
     return;
   }
@@ -1792,92 +1732,82 @@ static void execute_occurrence_by_type(const char *type, const double *args, siz
   generator(args, arg_count, body, origin_x, origin_y, origin_z, &runtime);
 }
 
-static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state,
-                                           int origin_x, int origin_y, int origin_z) {
+static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state, int origin_x, int origin_y, int origin_z) {
   if (!occurrence || !state) return;
 
   switch (occurrence->kind) {
-    case OCCURRENCE_KIND_DEFINITION: {
-      size_t arg_count = occurrence->args.count;
-      double *values = NULL;
-      if (arg_count > 0) {
-        values = malloc(sizeof(double) * arg_count);
-        if (!values) {
-          return;
-        }
-        for (size_t i = 0; i < arg_count; i++) {
-          values[i] = painter_evaluate_expression(occurrence->args.items[i],
-                                                  state->variables, state->functions);
-        }
-      }
-
-      occurrence_registry_set(state->occurrences, occurrence->name, occurrence->type,
-                              values, arg_count);
-      free(values);
-      break;
-    }
-
-    case OCCURRENCE_KIND_REFERENCE: {
-      OccurrenceRegistryEntry *entry = occurrence_registry_lookup(state->occurrences, occurrence->name);
-      if (!entry) {
+  case OCCURRENCE_KIND_DEFINITION: {
+    size_t arg_count = occurrence->args.count;
+    double *values = NULL;
+    if (arg_count > 0) {
+      values = malloc(sizeof(double) * arg_count);
+      if (!values) {
         return;
       }
-      execute_occurrence_by_type(entry->type, entry->args, entry->arg_count,
-                                 &occurrence->body, state, origin_x, origin_y, origin_z);
-      break;
-    }
-
-    case OCCURRENCE_KIND_IMMEDIATE: {
-      size_t arg_count = occurrence->args.count;
-      double *values = NULL;
-      if (arg_count > 0) {
-        values = malloc(sizeof(double) * arg_count);
-        if (!values) {
-          return;
-        }
-        for (size_t i = 0; i < arg_count; i++) {
-          values[i] = painter_evaluate_expression(occurrence->args.items[i],
-                                                  state->variables, state->functions);
-        }
+      for (size_t i = 0; i < arg_count; i++) {
+        values[i] = painter_evaluate_expression(occurrence->args.items[i], state);
       }
-
-      execute_occurrence_by_type(occurrence->type, values, arg_count,
-                                 &occurrence->body, state, origin_x, origin_y, origin_z);
-      free(values);
-      break;
     }
+
+    occurrence_registry_set(state->occurrences, occurrence->name, occurrence->type, values, arg_count);
+    free(values);
+    break;
+  }
+
+  case OCCURRENCE_KIND_REFERENCE: {
+    OccurrenceRegistryEntry *entry = occurrence_registry_lookup(state->occurrences, occurrence->name);
+    if (!entry) {
+      return;
+    }
+    execute_occurrence_by_type(entry->type, entry->args, entry->arg_count, &occurrence->body, state, origin_x, origin_y, origin_z);
+    break;
+  }
+
+  case OCCURRENCE_KIND_IMMEDIATE: {
+    size_t arg_count = occurrence->args.count;
+    double *values = NULL;
+    if (arg_count > 0) {
+      values = malloc(sizeof(double) * arg_count);
+      if (!values) {
+        return;
+      }
+      for (size_t i = 0; i < arg_count; i++) {
+        values[i] = painter_evaluate_expression(occurrence->args.items[i], state);
+      }
+    }
+
+    execute_occurrence_by_type(occurrence->type, values, arg_count, &occurrence->body, state, origin_x, origin_y, origin_z);
+    free(values);
+    break;
+  }
   }
 }
 
 // Section generation function
 Section *generate_section(Program *program, int section_x, int section_y, int section_z) {
   if (!program) return NULL;
-  
+
   Section *section = malloc(sizeof(Section));
   if (!section) return NULL;
-  
+
   // Initialize palette
   int palette_capacity = 16;
   section->palette = malloc(sizeof(char *) * palette_capacity);
   section->palette_size = 0;
-  
+
   // Initialize block array (16x16x16 = 4096 blocks)
   // Using air as default (index 0)
   int block_indices[4096] = {0};
-  
-  // Add air as the first palette entry
-  painter_palette_get_or_add(&section->palette, &section->palette_size,
-                             &palette_capacity, "minecraft:air");
-  
+
   // Convert section coordinates to world coordinates
   int base_x = section_x * 16;
   int base_y = section_y * 16;
   int base_z = section_z * 16;
-  
+
   // Initialize variable context
   VariableContext ctx;
   context_init(&ctx);
-  
+
   // Initialize and register built-in functionality
   MacroRegistry macro_registry;
   macro_registry_init(&macro_registry);
@@ -1892,35 +1822,38 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   occurrence_registry_init(&occurrence_registry);
 
   ExecutionState state = {
-    .variables = &ctx,
-    .macros = &macro_registry,
-    .functions = &function_registry,
-    .occurrences = &occurrence_registry,
-    .occurrence_types = &occurrence_type_registry,
-    .base_x = base_x,
-    .base_y = base_y,
-    .base_z = base_z,
-    .block_indices = block_indices,
-    .palette = &section->palette,
-    .palette_size = &section->palette_size,
-    .palette_capacity = &palette_capacity,
+      .variables = &ctx,
+      .macros = &macro_registry,
+      .functions = &function_registry,
+      .occurrences = &occurrence_registry,
+      .occurrence_types = &occurrence_type_registry,
+      .base_x = base_x,
+      .base_y = base_y,
+      .base_z = base_z,
+      .block_indices = block_indices,
+      .palette = &section->palette,
+      .palette_size = &section->palette_size,
+      .palette_capacity = &palette_capacity,
   };
-  
+
+  // Add air as the first palette entry
+  painter_palette_get_or_add(&state, "minecraft:air");
+
   // Process all instructions
   for (int i = 0; i < program->instruction_count; i++) {
     process_instruction(program->instructions[i], &state, 0, 0, 0);
   }
-  
+
   // Clean up
   context_free(&ctx);
   macro_registry_free(&macro_registry);
   function_registry_free(&function_registry);
   occurrence_type_registry_free(&occurrence_type_registry);
   occurrence_registry_free(&occurrence_registry);
-  
+
   // Calculate bits per entry
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);
-  
+
   // Pack block indices into data array
   if (section->bits_per_entry == 0) {
     // All blocks are the same, no data needed
@@ -1930,7 +1863,7 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
     int blocks_per_long = 64 / section->bits_per_entry;
     section->data_size = (4096 + blocks_per_long - 1) / blocks_per_long; // Ceiling division
     section->data = calloc(section->data_size, sizeof(uint64_t));
-    
+
     // Pack the indices
     for (int i = 0; i < 4096; i++) {
       int long_index = i / blocks_per_long;
@@ -1938,21 +1871,21 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
       section->data[long_index] |= ((uint64_t)block_indices[i]) << offset_in_long;
     }
   }
-  
+
   return section;
 }
 
 void section_free(Section *section) {
   if (!section) return;
-  
+
   // Free palette strings
   for (int i = 0; i < section->palette_size; i++) {
     free(section->palette[i]);
   }
   free(section->palette);
-  
+
   // Free data array
   free(section->data);
-  
+
   free(section);
 }

@@ -18,6 +18,11 @@ typedef struct MacroCall MacroCall;
 typedef struct MacroArgument MacroArgument;
 typedef struct FunctionRegistry FunctionRegistry;
 typedef struct FunctionRegistryEntry FunctionRegistryEntry;
+typedef struct ExecutionState ExecutionState;
+typedef struct MacroRegistry MacroRegistry;
+typedef struct OccurrenceRegistry OccurrenceRegistry;
+typedef struct OccurrenceTypeRegistry OccurrenceTypeRegistry;
+typedef struct VariableContext VariableContext;
 
 // Generic pointer-backed containers used throughout the parser/executor
 typedef struct {
@@ -138,17 +143,14 @@ typedef struct Occurrence {
 
 typedef struct OccurrenceRuntime OccurrenceRuntime;
 
-typedef void (*OccurrenceGenerator)(const double *args, size_t arg_count,
-                                    const InstructionList *body,
-                                    int origin_x, int origin_y, int origin_z,
-                                    OccurrenceRuntime *runtime);
+typedef void (*OccurrenceGenerator)(const double *args, size_t arg_count, const InstructionList *body, int origin_x, int origin_y,
+    int origin_z, OccurrenceRuntime *runtime);
 
 struct OccurrenceRuntime {
   int base_x;
   int base_y;
   int base_z;
-  void (*run_body)(void *userdata, const InstructionList *body,
-                   int anchor_x, int anchor_y, int anchor_z);
+  void (*run_body)(void *userdata, const InstructionList *body, int anchor_x, int anchor_y, int anchor_z);
   void *userdata;
 };
 
@@ -179,13 +181,13 @@ typedef struct MacroCall {
 
 // Conditional branch: if/elif with condition and body
 typedef struct ConditionalBranch {
-  Expression *condition;     // NULL for else branch
+  Expression *condition; // NULL for else branch
   InstructionList body;
 } ConditionalBranch;
 
 // If statement: if(...) {...} elif(...) {...} else {...}
 typedef struct IfStatement {
-  ConditionalBranch *branches;  // Array of if/elif/else branches
+  ConditionalBranch *branches; // Array of if/elif/else branches
   size_t branch_count;
   size_t branch_capacity;
 } IfStatement;
@@ -230,11 +232,11 @@ typedef struct {
 
 // Section structure (16x16x16 Minecraft section)
 typedef struct {
-  char **palette;           // Array of block strings (e.g., "air", "oak_planks[facing=east]")
-  int palette_size;         // Number of unique blocks in the palette
-  int bits_per_entry;       // Bits needed to represent each block index
-  uint64_t *data;           // Array of 64-bit integers holding block indices
-  int data_size;            // Number of uint64_t elements in data array
+  char **palette;     // Array of block strings (e.g., "air", "oak_planks[facing=east]")
+  int palette_size;   // Number of unique blocks in the palette
+  int bits_per_entry; // Bits needed to represent each block index
+  uint64_t *data;     // Array of 64-bit integers holding block indices
+  int data_size;      // Number of uint64_t elements in data array
 } Section;
 
 // Variable context for tracking values during execution
@@ -243,11 +245,11 @@ typedef struct Variable {
   double value;
 } Variable;
 
-typedef struct VariableContext {
+struct VariableContext {
   Variable *variables;
   size_t variable_count;
   size_t variable_capacity;
-} VariableContext;
+};
 
 // Occurrence registry entry used at execution time
 typedef struct {
@@ -257,22 +259,22 @@ typedef struct {
   size_t arg_count;
 } OccurrenceRegistryEntry;
 
-typedef struct {
+struct OccurrenceRegistry {
   OccurrenceRegistryEntry *entries;
   size_t entry_count;
   size_t entry_capacity;
-} OccurrenceRegistry;
+};
 
 typedef struct {
   char name[MAX_TOKEN_VALUE_LENGTH];
   OccurrenceGenerator generator;
 } OccurrenceTypeRegistryEntry;
 
-typedef struct {
+struct OccurrenceTypeRegistry {
   OccurrenceTypeRegistryEntry *entries;
   size_t entry_count;
   size_t entry_capacity;
-} OccurrenceTypeRegistry;
+};
 
 // Built-in function signature (returns a double result for evaluated arguments)
 typedef double (*BuiltinFunction)(const double *args, size_t arg_count);
@@ -291,14 +293,26 @@ struct FunctionRegistry {
   size_t entry_capacity;
 };
 
+// Execution state that holds all runtime context for code generation
+struct ExecutionState {
+  VariableContext *variables;
+  MacroRegistry *macros;
+  FunctionRegistry *functions;
+  OccurrenceRegistry *occurrences;
+  OccurrenceTypeRegistry *occurrence_types;
+  int base_x;
+  int base_y;
+  int base_z;
+  int *block_indices;
+  char ***palette;
+  int *palette_size;
+  int *palette_capacity;
+};
+
 // Macro generator function type
-// Takes: variable context, macro arguments, argument count, section info, block_indices, palette info
+// Takes: execution state with variable context, macro arguments, function registry, and section info
 // Modifies block_indices array to place blocks
-typedef void (*MacroGenerator)(VariableContext *ctx, const MacroArgumentList *args,
-                               FunctionRegistry *function_registry,
-                               int base_x, int base_y, int base_z,
-                               int *block_indices, char ***palette, 
-                               int *palette_size, int *palette_capacity);
+typedef void (*MacroGenerator)(ExecutionState *state, const MacroArgumentList *args);
 
 // Macro registry entry
 typedef struct {
@@ -307,11 +321,11 @@ typedef struct {
 } MacroRegistryEntry;
 
 // Macro registry
-typedef struct {
+struct MacroRegistry {
   MacroRegistryEntry *entries;
   size_t entry_count;
   size_t entry_capacity;
-} MacroRegistry;
+};
 
 // Parser API
 void parser_init(Parser *parser, const char *input);
@@ -336,23 +350,18 @@ MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name);
 void occurrence_registry_init(OccurrenceRegistry *registry);
 void occurrence_registry_free(OccurrenceRegistry *registry);
 OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry, const char *name);
-bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type,
-                             const double *args, size_t arg_count);
+bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const double *args, size_t arg_count);
 
 void occurrence_type_registry_init(OccurrenceTypeRegistry *registry);
 void occurrence_type_registry_free(OccurrenceTypeRegistry *registry);
-void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name,
-                                       OccurrenceGenerator generator);
+void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name, OccurrenceGenerator generator);
 OccurrenceGenerator occurrence_type_registry_lookup(OccurrenceTypeRegistry *registry, const char *name);
 void macro_registry_free(MacroRegistry *registry);
 
 // Function registry API
 void function_registry_init(FunctionRegistry *registry);
-bool function_registry_register(FunctionRegistry *registry, const char *name,
-                                size_t min_args, size_t max_args,
-                                BuiltinFunction function);
-const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry,
-                                                      const char *name);
+bool function_registry_register(FunctionRegistry *registry, const char *name, size_t min_args, size_t max_args, BuiltinFunction function);
+const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry, const char *name);
 void function_registry_free(FunctionRegistry *registry);
 
 // Variable context API
@@ -365,11 +374,8 @@ double context_get(VariableContext *ctx, const char *name);
 Expression *macro_get_arg(const MacroArgumentList *args, const char *name);
 
 // Expression evaluation helpers (exposed for macro implementations)
-double painter_evaluate_expression(const Expression *expr, VariableContext *ctx,
-                                   FunctionRegistry *function_registry);
+double painter_evaluate_expression(const Expression *expr, ExecutionState *state);
 
 // Palette helpers shared between the interpreter and macros
-int painter_palette_get_or_add(char ***palette, int *palette_size, int *palette_capacity,
-                               const char *block_string);
-void painter_format_block(char *buffer, size_t buffer_size,
-                          const char *block_name, const char *block_properties);
+int painter_palette_get_or_add(ExecutionState *state, const char *block_string);
+void painter_format_block(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties);
