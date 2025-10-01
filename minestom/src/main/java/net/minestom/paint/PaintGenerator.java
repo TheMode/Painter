@@ -51,7 +51,7 @@ public final class PaintGenerator implements Generator {
             int[] blockStateIds = new int[palette.length];
             for (int i = 0; i < palette.length; i++) {
                 Block block = Block.fromState(palette[i]);
-                assert block != null;
+                if (block == null) continue; // Invalid block state
                 blockStateIds[i] = block.stateId();
             }
 

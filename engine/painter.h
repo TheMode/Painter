@@ -177,6 +177,19 @@ typedef struct MacroCall {
   MacroArgumentList arguments;
 } MacroCall;
 
+// Conditional branch: if/elif with condition and body
+typedef struct ConditionalBranch {
+  Expression *condition;     // NULL for else branch
+  InstructionList body;
+} ConditionalBranch;
+
+// If statement: if(...) {...} elif(...) {...} else {...}
+typedef struct IfStatement {
+  ConditionalBranch *branches;  // Array of if/elif/else branches
+  size_t branch_count;
+  size_t branch_capacity;
+} IfStatement;
+
 // Instruction types
 typedef enum {
   INSTR_BLOCK_PLACEMENT,
@@ -185,6 +198,7 @@ typedef enum {
   INSTR_OCCURRENCE,
   INSTR_PALETTE_DEFINITION,
   INSTR_MACRO_CALL,
+  INSTR_IF_STATEMENT,
 } InstructionType;
 
 typedef struct Instruction {
@@ -196,6 +210,7 @@ typedef struct Instruction {
     Occurrence occurrence;
     PaletteDefinition palette_definition;
     MacroCall macro_call;
+    IfStatement if_statement;
   };
 } Instruction;
 

@@ -129,6 +129,7 @@ static Expression *parse_function_call(Parser *parser, const char *name);
 static Instruction *parse_instruction(Parser *parser);
 static BlockPlacement parse_block_placement(Parser *parser);
 static ForLoop parse_for_loop(Parser *parser);
+static IfStatement parse_if_statement(Parser *parser);
 static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence);
 static bool parse_occurrence_body(Parser *parser, Occurrence *occurrence);
 static Occurrence parse_occurrence(Parser *parser);
@@ -596,6 +597,119 @@ static ForLoop parse_for_loop(Parser *parser) {
   return loop;
 }
 
+static IfStatement parse_if_statement(Parser *parser) {
+  IfStatement if_stmt = {0};
+  if_stmt.branches = NULL;
+  if_stmt.branch_count = 0;
+  if_stmt.branch_capacity = 0;
+
+  // 'if' keyword is already consumed by caller
+
+  while (true) {
+    // Allocate space for new branch
+    if (if_stmt.branch_count >= if_stmt.branch_capacity) {
+      size_t new_capacity = if_stmt.branch_capacity == 0 ? 2 : if_stmt.branch_capacity * 2;
+      ConditionalBranch *new_branches = realloc(if_stmt.branches, new_capacity * sizeof(ConditionalBranch));
+      if (!new_branches) {
+        parser_error(parser, "Out of memory");
+        return if_stmt;
+      }
+      if_stmt.branches = new_branches;
+      if_stmt.branch_capacity = new_capacity;
+    }
+
+    ConditionalBranch *branch = &if_stmt.branches[if_stmt.branch_count];
+    instruction_list_reset(&branch->body);
+    
+    // Check if this is an 'else' branch (no condition)
+    if (if_stmt.branch_count > 0 && consume_keyword("else")) {
+      branch->condition = NULL;
+      
+      // Check if this is 'else' without 'if' (final else)
+      if (!consume_keyword("if")) {
+        // Final else branch - must have body
+        if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' after else")) {
+          return if_stmt;
+        }
+
+        // Parse else body
+        while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
+          Instruction *instr = parse_instruction(parser);
+          if (!instr) {
+            if (parser->has_error) break;
+            continue;
+          }
+          if (!instruction_list_push(parser, &branch->body, instr)) {
+            instruction_free(instr);
+            break;
+          }
+        }
+
+        expect_token(parser, TOKEN_RIGHT_BRACE, "Expected '}' after else body");
+        if_stmt.branch_count++;
+        break; // else is always the last branch
+      }
+      // else if - fall through to parse condition
+    }
+
+    // Parse condition for if/elif
+    if (!expect_token(parser, TOKEN_LEFT_PAREN, "Expected '(' after if/elif")) {
+      return if_stmt;
+    }
+
+    branch->condition = parse_expression(parser);
+    if (!branch->condition) {
+      return if_stmt;
+    }
+
+    if (!expect_token(parser, TOKEN_RIGHT_PAREN, "Expected ')' after if condition")) {
+      expression_free(branch->condition);
+      return if_stmt;
+    }
+
+    // Parse body
+    if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' after if condition")) {
+      expression_free(branch->condition);
+      return if_stmt;
+    }
+
+    while (peek_type() != TOKEN_RIGHT_BRACE && peek_type() != TOKEN_EOF) {
+      Instruction *instr = parse_instruction(parser);
+      if (!instr) {
+        if (parser->has_error) break;
+        continue;
+      }
+      if (!instruction_list_push(parser, &branch->body, instr)) {
+        instruction_free(instr);
+        break;
+      }
+    }
+
+    expect_token(parser, TOKEN_RIGHT_BRACE, "Expected '}' after if body");
+    if_stmt.branch_count++;
+
+    // Check for elif or else
+    Token next_tok = peek();
+    if (next_tok.type != TOKEN_IDENTIFIER) {
+      break; // No more branches
+    }
+    
+    if (strcmp(next_tok.value, "elif") == 0) {
+      next(); // Consume 'elif'
+      // Continue loop to parse elif as a new branch with condition
+      continue;
+    } else if (strcmp(next_tok.value, "else") == 0) {
+      // Don't consume 'else' yet - let next iteration handle it
+      continue;
+    } else {
+      // Not elif or else, we're done
+      break;
+    }
+  }
+
+  return if_stmt;
+}
+
 static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
   expression_list_reset(&occurrence->args);
   occurrence->condition = NULL;
@@ -890,6 +1004,17 @@ static Instruction *parse_instruction(Parser *parser) {
     return instr;
   }
 
+  // If statement: if(...) { ... } elif(...) { ... } else { ... }
+  if (consume_keyword("if")) {
+    instr->type = INSTR_IF_STATEMENT;
+    instr->if_statement = parse_if_statement(parser);
+    if (parser->has_error) {
+      free(instr);
+      return NULL;
+    }
+    return instr;
+  }
+
   // Occurrence: @type(...) { ... } or variable = @type(...)
   if (peek_type() == TOKEN_AT) {
     instr->type = INSTR_OCCURRENCE;
@@ -1044,6 +1169,17 @@ void instruction_free(Instruction *instr) {
         instruction_free(instr->for_loop.body.items[i]);
       }
       free(instr->for_loop.body.items);
+      break;
+    case INSTR_IF_STATEMENT:
+      for (size_t i = 0; i < instr->if_statement.branch_count; i++) {
+        ConditionalBranch *branch = &instr->if_statement.branches[i];
+        expression_free(branch->condition);
+        for (size_t j = 0; j < branch->body.count; j++) {
+          instruction_free(branch->body.items[j]);
+        }
+        free(branch->body.items);
+      }
+      free(instr->if_statement.branches);
       break;
     case INSTR_OCCURRENCE:
       for (size_t i = 0; i < instr->occurrence.args.count; i++) {
@@ -1564,6 +1700,35 @@ static void process_instruction(Instruction *instr, ExecutionState *state,
 
         for (size_t j = 0; j < loop->body.count; j++) {
           process_instruction(loop->body.items[j], state, origin_x, origin_y, origin_z);
+        }
+      }
+      break;
+    }
+
+    case INSTR_IF_STATEMENT: {
+      IfStatement *if_stmt = &instr->if_statement;
+
+      // Evaluate each branch in order
+      for (size_t i = 0; i < if_stmt->branch_count; i++) {
+        ConditionalBranch *branch = &if_stmt->branches[i];
+        
+        // If condition is NULL, this is an 'else' branch (always execute)
+        bool should_execute = (branch->condition == NULL);
+        
+        // Otherwise evaluate the condition
+        if (!should_execute) {
+          double condition_value = painter_evaluate_expression(branch->condition, 
+                                                              state->variables, 
+                                                              state->functions);
+          should_execute = (condition_value != 0.0); // non-zero is true
+        }
+
+        if (should_execute) {
+          // Execute this branch and stop checking further branches
+          for (size_t j = 0; j < branch->body.count; j++) {
+            process_instruction(branch->body.items[j], state, origin_x, origin_y, origin_z);
+          }
+          break; // Don't check remaining elif/else branches
         }
       }
       break;

@@ -62,6 +62,31 @@ static double fn_step(const double *args, size_t count) {
   return x < edge ? 0.0 : 1.0;
 }
 
+static double fn_sin(const double *args, size_t count) {
+  (void)count;
+  return sin(args[0]);
+}
+
+static double fn_cos(const double *args, size_t count) {
+  (void)count;
+  return cos(args[0]);
+}
+
+static double fn_tan(const double *args, size_t count) {
+  (void)count;
+  return tan(args[0]);
+}
+
+static double fn_sqrt(const double *args, size_t count) {
+  (void)count;
+  return sqrt(args[0]);
+}
+
+static double fn_pow(const double *args, size_t count) {
+  (void)count;
+  return pow(args[0], args[1]);
+}
+
 const BuiltinFunctionSpec BUILTIN_FUNCTIONS[] = {
     {"min", 1, SIZE_MAX, fn_min},
     {"max", 1, SIZE_MAX, fn_max},
@@ -70,6 +95,11 @@ const BuiltinFunctionSpec BUILTIN_FUNCTIONS[] = {
     {"abs", 1, 1, fn_abs},
     {"clamp", 3, 3, fn_clamp},
     {"step", 2, 2, fn_step},
+    {"sin", 1, 1, fn_sin},
+    {"cos", 1, 1, fn_cos},
+    {"tan", 1, 1, fn_tan},
+    {"sqrt", 1, 1, fn_sqrt},
+    {"pow", 2, 2, fn_pow},
 };
 
 const size_t BUILTIN_FUNCTION_COUNT = sizeof(BUILTIN_FUNCTIONS) / sizeof(BuiltinFunctionSpec);

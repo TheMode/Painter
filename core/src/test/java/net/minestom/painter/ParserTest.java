@@ -230,4 +230,91 @@ class ParserTest {
             }
         }
     }
+
+    @Test
+    @DisplayName("If/elif/else conditional statements work correctly")
+    void testIfElifElseStatement() {
+        String programSource = """
+                x = 5
+                
+                if(x < 3) {
+                  [0 0 0] stone
+                } elif(x < 7) {
+                  [1 0 0] diamond_block
+                } else {
+                  [2 0 0] gold_block
+                }
+                
+                if(x == 5) {
+                  [3 0 0] emerald_block
+                }
+                """;
+
+        MemorySegment program = null;
+        try {
+            program = PainterParser.parseString(programSource);
+            PainterParser.SectionData section = PainterParser.generateSection(program, 0, 0, 0);
+            assertNotNull(section, "Section should generate");
+
+            int diamondIndex = findPaletteIndex(section, "diamond_block");
+            int emeraldIndex = findPaletteIndex(section, "emerald_block");
+            int stoneIndex = findPaletteIndex(section, "stone");
+            int goldIndex = findPaletteIndex(section, "gold_block");
+
+            assertTrue(diamondIndex >= 0, "Diamond block should be placed (elif branch)");
+            assertTrue(emeraldIndex >= 0, "Emerald block should be placed (simple if)");
+            assertEquals(-1, stoneIndex, "Stone should not be placed (if condition false)");
+            assertEquals(-1, goldIndex, "Gold block should not be placed (else not reached)");
+
+            assertEquals(diamondIndex, getBlockIndex(section, 1, 0, 0), "Diamond at (1,0,0)");
+            assertEquals(emeraldIndex, getBlockIndex(section, 3, 0, 0), "Emerald at (3,0,0)");
+        } finally {
+            if (program != null) {
+                PainterParser.freeProgram(program);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Rainbow tower script parses successfully")
+    void testRainbowTowerParse() {
+        String programSource = """
+                // Configuration
+                tower_height = 50
+                radius = 5
+                spirals = 3
+                
+                // Build the spiral
+                for y in 0..tower_height {
+                  angle = y * spirals * 6.28 / tower_height
+                  x = radius * cos(angle)
+                  z = radius * sin(angle)
+                  
+                  // Rainbow colors based on height
+                  color_index = (y * 16) / tower_height
+                  
+                  // Different blocks at different heights
+                  if(y < tower_height / 3) {
+                    [x y z] red_concrete
+                  } elif(y < tower_height * 2 / 3) {
+                    [x y z] yellow_concrete
+                  } else {
+                    [x y z] blue_concrete
+                  }
+                }
+                
+                // Add a base platform
+                for x in -10..10 {
+                  for z in -10..10 {
+                    [x -1 z] stone
+                  }
+                }
+                
+                // Place a beacon on top
+                [0 tower_height 0] beacon
+                """;
+
+        assertParseSucceed(programSource);
+    }
 }
+

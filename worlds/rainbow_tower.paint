@@ -1,0 +1,40 @@
+// ========================================
+// RAINBOW SPIRAL TOWER
+// A colorful spiral tower demonstrating
+// loops, variables, and block properties
+// Perfect for sharing!
+// ========================================
+
+// Configuration
+tower_height = 50
+radius = 5
+spirals = 3
+
+// Build the spiral
+for y in 0..tower_height {
+  angle = y * spirals * 6.28 / tower_height
+  x = radius * cos(angle)
+  z = radius * sin(angle)
+  
+  // Rainbow colors based on height
+  color_index = (y * 16) / tower_height
+  
+  // Different blocks at different heights
+  if(y < tower_height / 3) {
+    [x y z] red_concrete
+  } elif(y < tower_height * 2 / 3) {
+    [x y z] yellow_concrete
+  } else {
+    [x y z] blue_concrete
+  }
+}
+
+// Add a base platform
+for x in -10..10 {
+  for z in -10..10 {
+    [x -1 z] stone
+  }
+}
+
+// Place a beacon on top
+[0 tower_height 0] beacon
