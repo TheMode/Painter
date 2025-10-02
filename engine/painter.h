@@ -395,9 +395,6 @@ PAINTER_API double context_get(VariableContext *ctx, const char *name);
 // Helper function to get named argument by name
 PAINTER_API Expression *named_arg_get(const NamedArgumentList *args, const char *name);
 
-// Expression evaluation helpers (exposed for macro implementations)
-PAINTER_API double painter_evaluate_expression(const Expression *expr, ExecutionState *state);
-
 // Palette helpers shared between the interpreter and macros
 PAINTER_API int painter_palette_get_or_add(ExecutionState *state, const char *block_string);
 PAINTER_API bool painter_section_contains_point(const ExecutionState *state, int x, int y, int z);

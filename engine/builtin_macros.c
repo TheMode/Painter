@@ -1,4 +1,6 @@
 #include "builtin_macros.h"
+#include "painter_eval.h"
+
 // Sphere macro: #sphere .x=<x> .y=<y> .z=<z> .radius=<radius> .block=<block_name>
 // Generates a filled 3D sphere
 void builtin_macro_sphere(ExecutionState *state, const NamedArgumentList *args) {

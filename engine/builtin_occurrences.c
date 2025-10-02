@@ -1,4 +1,5 @@
 #include "builtin_occurrences.h"
+#include "painter_eval.h"
 #define FNL_IMPL
 #include "FastNoiseLite.h"
 
