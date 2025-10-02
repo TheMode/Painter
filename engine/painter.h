@@ -7,13 +7,13 @@
 
 // DLL export/import macros for Windows
 #ifdef _WIN32
-  #ifdef PAINTER_BUILD_DLL
-    #define PAINTER_API __declspec(dllexport)
-  #else
-    #define PAINTER_API __declspec(dllimport)
-  #endif
+#ifdef PAINTER_BUILD_DLL
+#define PAINTER_API __declspec(dllexport)
 #else
-  #define PAINTER_API
+#define PAINTER_API __declspec(dllimport)
+#endif
+#else
+#define PAINTER_API
 #endif
 
 // Forward declarations
@@ -154,8 +154,8 @@ typedef struct Occurrence {
 
 typedef struct OccurrenceRuntime OccurrenceRuntime;
 
-typedef void (*OccurrenceGenerator)(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y,
-    int origin_z, OccurrenceRuntime *runtime);
+typedef void (*OccurrenceGenerator)(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x,
+    int origin_y, int origin_z, OccurrenceRuntime *runtime);
 
 struct OccurrenceRuntime {
   int base_x;
@@ -394,9 +394,3 @@ PAINTER_API double context_get(VariableContext *ctx, const char *name);
 
 // Helper function to get named argument by name
 PAINTER_API Expression *named_arg_get(const NamedArgumentList *args, const char *name);
-
-// Palette helpers shared between the interpreter and macros
-PAINTER_API int painter_palette_get_or_add(ExecutionState *state, const char *block_string);
-PAINTER_API bool painter_section_contains_point(const ExecutionState *state, int x, int y, int z);
-PAINTER_API bool painter_section_clip_aabb(const ExecutionState *state, PainterAABB *box);
-PAINTER_API void painter_format_block(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties);
