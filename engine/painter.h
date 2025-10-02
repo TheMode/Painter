@@ -5,6 +5,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// DLL export/import macros for Windows
+#ifdef _WIN32
+  #ifdef PAINTER_BUILD_DLL
+    #define PAINTER_API __declspec(dllexport)
+  #else
+    #define PAINTER_API __declspec(dllimport)
+  #endif
+#else
+  #define PAINTER_API
+#endif
+
 // Forward declarations
 typedef struct Instruction Instruction;
 typedef struct Expression Expression;
@@ -339,56 +350,56 @@ struct MacroRegistry {
 };
 
 // Parser API
-void parser_init(Parser *parser, const char *input);
-Program *parse_program(Parser *parser);
-void program_free(Program *program);
+PAINTER_API void parser_init(Parser *parser, const char *input);
+PAINTER_API Program *parse_program(Parser *parser);
+PAINTER_API void program_free(Program *program);
 
 // Section generation API
-Section *generate_section(Program *program, int section_x, int section_y, int section_z);
-void section_free(Section *section);
+PAINTER_API Section *generate_section(Program *program, int section_x, int section_y, int section_z);
+PAINTER_API void section_free(Section *section);
 
 // Helper functions
-void parser_error(Parser *parser, const char *message);
-void expression_free(Expression *expr);
-void instruction_free(Instruction *instr);
+PAINTER_API void parser_error(Parser *parser, const char *message);
+PAINTER_API void expression_free(Expression *expr);
+PAINTER_API void instruction_free(Instruction *instr);
 
 // Macro registry API
-void macro_registry_init(MacroRegistry *registry);
-void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator);
-MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name);
+PAINTER_API void macro_registry_init(MacroRegistry *registry);
+PAINTER_API void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator);
+PAINTER_API MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name);
 
 // Occurrence registry helpers
-void occurrence_registry_init(OccurrenceRegistry *registry);
-void occurrence_registry_free(OccurrenceRegistry *registry);
-OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry, const char *name);
-bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const NamedArgumentList *args);
+PAINTER_API void occurrence_registry_init(OccurrenceRegistry *registry);
+PAINTER_API void occurrence_registry_free(OccurrenceRegistry *registry);
+PAINTER_API OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry, const char *name);
+PAINTER_API bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, const char *type, const NamedArgumentList *args);
 
-void occurrence_type_registry_init(OccurrenceTypeRegistry *registry);
-void occurrence_type_registry_free(OccurrenceTypeRegistry *registry);
-void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name, OccurrenceGenerator generator);
-OccurrenceGenerator occurrence_type_registry_lookup(OccurrenceTypeRegistry *registry, const char *name);
-void macro_registry_free(MacroRegistry *registry);
+PAINTER_API void occurrence_type_registry_init(OccurrenceTypeRegistry *registry);
+PAINTER_API void occurrence_type_registry_free(OccurrenceTypeRegistry *registry);
+PAINTER_API void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name, OccurrenceGenerator generator);
+PAINTER_API OccurrenceGenerator occurrence_type_registry_lookup(OccurrenceTypeRegistry *registry, const char *name);
+PAINTER_API void macro_registry_free(MacroRegistry *registry);
 
 // Function registry API
-void function_registry_init(FunctionRegistry *registry);
-bool function_registry_register(FunctionRegistry *registry, const char *name, size_t min_args, size_t max_args, BuiltinFunction function);
-const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry, const char *name);
-void function_registry_free(FunctionRegistry *registry);
+PAINTER_API void function_registry_init(FunctionRegistry *registry);
+PAINTER_API bool function_registry_register(FunctionRegistry *registry, const char *name, size_t min_args, size_t max_args, BuiltinFunction function);
+PAINTER_API const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *registry, const char *name);
+PAINTER_API void function_registry_free(FunctionRegistry *registry);
 
 // Variable context API
-void context_init(VariableContext *ctx);
-void context_free(VariableContext *ctx);
-void context_set(VariableContext *ctx, const char *name, double value);
-double context_get(VariableContext *ctx, const char *name);
+PAINTER_API void context_init(VariableContext *ctx);
+PAINTER_API void context_free(VariableContext *ctx);
+PAINTER_API void context_set(VariableContext *ctx, const char *name, double value);
+PAINTER_API double context_get(VariableContext *ctx, const char *name);
 
 // Helper function to get named argument by name
-Expression *named_arg_get(const NamedArgumentList *args, const char *name);
+PAINTER_API Expression *named_arg_get(const NamedArgumentList *args, const char *name);
 
 // Expression evaluation helpers (exposed for macro implementations)
-double painter_evaluate_expression(const Expression *expr, ExecutionState *state);
+PAINTER_API double painter_evaluate_expression(const Expression *expr, ExecutionState *state);
 
 // Palette helpers shared between the interpreter and macros
-int painter_palette_get_or_add(ExecutionState *state, const char *block_string);
-bool painter_section_contains_point(const ExecutionState *state, int x, int y, int z);
-bool painter_section_clip_aabb(const ExecutionState *state, PainterAABB *box);
-void painter_format_block(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties);
+PAINTER_API int painter_palette_get_or_add(ExecutionState *state, const char *block_string);
+PAINTER_API bool painter_section_contains_point(const ExecutionState *state, int x, int y, int z);
+PAINTER_API bool painter_section_clip_aabb(const ExecutionState *state, PainterAABB *box);
+PAINTER_API void painter_format_block(char *buffer, size_t buffer_size, const char *block_name, const char *block_properties);

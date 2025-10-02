@@ -19,5 +19,10 @@ dependencies {
 }
 
 tasks.withType<Test> {
+    jvmArgs("--enable-preview", "--enable-native-access=ALL-UNNAMED")
     useJUnitPlatform()
+}
+
+tasks.withType<JavaExec> {
+    jvmArgs("--enable-preview", "--enable-native-access=ALL-UNNAMED")
 }
