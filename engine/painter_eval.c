@@ -493,7 +493,7 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
       .palette_capacity = &palette_capacity,
   };
 
-  if (painter_palette_get_or_add(&state, "minecraft:air") < 0) {
+  if (painter_palette_get_or_add(&state, "air") < 0) {
     goto cleanup;
   }
 

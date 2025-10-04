@@ -4,6 +4,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.MemorySegment;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -49,9 +52,19 @@ final class ParserTest {
         return (int) ((value >>> offset) & mask);
     }
 
-    public static void assertPaletteContains(PainterParser.SectionData section, String... blockId) {
-        for (String id : blockId) {
-            assertTrue(paletteIndex(section, id) >= 0, "Palette must contain: " + id);
+    public static void assertPaletteContains(PainterParser.SectionData section, String... blockIds) {
+        List<String> missing = new ArrayList<>();
+        for (String id : blockIds) {
+            if (paletteIndex(section, id) < 0) {
+                missing.add(id);
+            }
+        }
+        if (!missing.isEmpty()) {
+            fail(String.format(
+                    "Palette missing entries: %s%nActual palette: %s",
+                    missing,
+                    Arrays.toString(section.palette())
+            ));
         }
     }
 
@@ -173,7 +186,7 @@ final class ParserTest {
     @DisplayName("Nested loops with negative ranges")
     void testNestedLoopsWithNegativeRanges() {
         assertParseSucceed("""
-                [0 36 0] minecraft:grass_block
+                [0 36 0] grass_block
                 for i in -25..25 {
                   for z in -25..25 {
                     [i 28 z] stone
@@ -214,12 +227,12 @@ final class ParserTest {
     void testEveryOccurrenceExecution(ProgramContext ctx) {
         PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
 
-        assertPaletteContains(section, "oak_planks", "minecraft:air");
+        assertPaletteContains(section, "oak_planks", "air");
 
         assertBlockAt(section, 0, 0, 0, "oak_planks");
         assertBlockAt(section, 0, 4, 0, "oak_planks");
         assertBlockAt(section, 0, 8, 0, "oak_planks");
-        assertBlockAt(section, 0, 2, 0, "minecraft:air");
+        assertBlockAt(section, 0, 2, 0, "air");
         assertEquals(2, section.palette().length, "Only air and oak planks expected in palette");
     }
 
@@ -394,7 +407,7 @@ final class ParserTest {
     void testSectionOccurrenceExecution(ProgramContext ctx) {
         PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
 
-        assertPaletteContains(section, "oak_log", "oak_leaves", "minecraft:air");
+        assertPaletteContains(section, "oak_log", "oak_leaves", "air");
 
         // Tree trunk at section offset (8, *, 8)
         assertBlockAt(section, 8, 0, 8, "oak_log");
@@ -407,8 +420,8 @@ final class ParserTest {
         assertBlockAt(section, 9, 3, 8, "oak_leaves");
 
         // Verify air at non-tree positions
-        assertBlockAt(section, 0, 0, 0, "minecraft:air");
-        assertBlockAt(section, 15, 15, 15, "minecraft:air");
+        assertBlockAt(section, 0, 0, 0, "air");
+        assertBlockAt(section, 15, 15, 15, "air");
     }
 
     @PaintTest("""

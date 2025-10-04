@@ -26,7 +26,7 @@ public class PaintProgramExtension implements ParameterResolver, AfterEachCallba
     @Override
     public Object resolveParameter(ParameterContext parameterContext, ExtensionContext extensionContext)
             throws ParameterResolutionException {
-        
+
         // Get the @PaintTest annotation from the test method
         PaintTest annotation = extensionContext.getRequiredTestMethod()
                 .getAnnotation(PaintTest.class);
