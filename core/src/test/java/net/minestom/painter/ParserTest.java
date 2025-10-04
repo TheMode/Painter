@@ -2,32 +2,137 @@ package net.minestom.painter;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Painter Parser Tests")
 final class ParserTest {
 
-    private static void assertParseSucceed(String program) {
+    @ParameterizedTest(name = "{index} {0}")
+    @MethodSource("validPrograms")
+    void parses(String program) {
         MemorySegment programSegment = null;
         try {
             programSegment = PainterParser.parseString(program);
             assertNotNull(programSegment, "Program should parse successfully");
         } finally {
-            if (programSegment != null) {
-                PainterParser.freeProgram(programSegment);
-            }
+            if (programSegment != null) PainterParser.freeProgram(programSegment);
         }
     }
 
-    private static void assertParseFail(String program) {
+    static Stream<Arguments> validPrograms() {
+        return Stream.of(
+                Arguments.of("[0 0] air"),
+                Arguments.of("[1 50 0] oak_planks[facing=north,half=top]"),
+                Arguments.of("""
+                        x = 5
+                        [x 0] stone
+                        """),
+                Arguments.of("""
+                        x = 2
+                        z = 3
+                        [x 0 z] dirt
+                        """),
+                Arguments.of("""
+                        [min(4, 2, -8) 0 0] stone
+                        """),
+                Arguments.of("""
+                        value = clamp(5, min(1, 3), max(2, 7))
+                        [value 0 0] stone
+                        """),
+                Arguments.of("""
+                        for i in 0..5 {
+                          [i 36 1] stone
+                        }
+                        """),
+                Arguments.of("""
+                        for x in 0..3 {
+                          for z in 0..3 {
+                            [x 37 z] oak_planks
+                          }
+                        }
+                        """),
+                Arguments.of("""
+                        for i in 0..5 {
+                          [i*2 38 0] diamond_block
+                        }
+                        """),
+                Arguments.of("""
+                        offset = 5
+                        for i in 0..3 {
+                          [i+offset 39 0] gold_block
+                        }
+                        """),
+                Arguments.of("""
+                        for i in -5..5 {
+                          [i 40 0] emerald_block
+                        }
+                        """),
+                Arguments.of("""
+                        [0 36 0] grass_block
+                        for i in -25..25 {
+                          for z in -25..25 {
+                            [i 28 z] stone
+                          }
+                        }
+                        """),
+                Arguments.of("#sphere .x=8 .radius=5 .block=stone"),
+                Arguments.of("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone"),
+                Arguments.of("""
+                        repeat = @every .x=0 .y=4 .z=0
+                        repeat {
+                          [0 0] oak_planks
+                        }
+                        """),
+                Arguments.of("""
+                        // Generate terrain (no threshold, just height variation)
+                        @noise .frequency=0.025 .seed=77777 .amplitude=20 .base_y=70 {
+                          [0 0 0] grass_block
+                          [0 -1 0] dirt
+                        }
+                        
+                        // Add trees with threshold for sparsity, same terrain height
+                        @noise .frequency=0.025 .seed=77777 .threshold=0.75 .amplitude=20 .base_y=70 {
+                          [0 1 0] oak_log
+                          [0 2 0] oak_log
+                          [0 3 0] oak_log
+                          [-1 3 0] oak_leaves
+                          [1 3 0] oak_leaves
+                          [0 3 -1] oak_leaves
+                          [0 3 1] oak_leaves
+                          [0 4 0] oak_leaves
+                        }
+                        """
+                )
+        );
+    }
+
+    @ParameterizedTest(name = "{index} invalid: {0}")
+    @MethodSource("invalidPrograms")
+    void failsToParse(String program) {
         assertThrows(RuntimeException.class, () -> PainterParser.parseString(program),
                 "Should throw exception for invalid syntax");
+    }
+
+    static Stream<Arguments> invalidPrograms() {
+        return Stream.of(
+                Arguments.of("invalid syntax here"),
+                Arguments.of("[0]"), // incomplete coordinate
+                Arguments.of("[0 0 0"), // missing closing bracket
+                Arguments.of("for i in 0.. { [0 0 0] stone }"), // malformed range
+                Arguments.of("#sphere .x=5 .radius"), // malformed macro args
+                Arguments.of("repeat = @every .x=0 .y= { repeat { [0 0] oak_planks }"), // broken occurrence
+                Arguments.of("[min(  ,  ) 0 0] stone") // malformed function call
+        );
     }
 
     private static int paletteIndex(PainterParser.SectionData section, String blockId) {
@@ -73,149 +178,6 @@ final class ParserTest {
         assertTrue(pi >= 0, "Expected block not present in palette: " + expectedBlockId);
         assertEquals(pi, blockIndex(section, x, y, z),
                 "Block mismatch at (" + x + "," + y + "," + z + ")");
-    }
-
-    @Test
-    @DisplayName("Parse simple block placement")
-    void testSimpleBlockPlacement() {
-        assertParseSucceed("[0 0] air");
-    }
-
-    @Test
-    @DisplayName("Parse block with properties")
-    void testBlockWithProperties() {
-        assertParseSucceed("[1 50 0] oak_planks[facing=north,half=top]");
-    }
-
-    @Test
-    @DisplayName("Parse variable assignment")
-    void testVariableAssignment() {
-        assertParseSucceed("""
-                x = 5
-                [x 0] stone
-                """);
-    }
-
-    @Test
-    @DisplayName("Parse arithmetic expressions")
-    void testArithmeticExpressions() {
-        assertParseSucceed("""
-                x = 2
-                z = 3
-                [x 0 z] dirt
-                """);
-    }
-
-    @Test
-    @DisplayName("Parse function call expressions")
-    void testFunctionCalls() {
-        assertParseSucceed("""
-                [min(4, 2, -8) 0 0] stone
-                """);
-    }
-
-    @Test
-    @DisplayName("Parse nested function calls")
-    void testNestedFunctionCalls() {
-        assertParseSucceed("""
-                value = clamp(5, min(1, 3), max(2, 7))
-                [value 0 0] stone
-                """);
-    }
-
-    @Test
-    @DisplayName("Invalid syntax throws error")
-    void testInvalidSyntax() {
-        assertParseFail("invalid syntax here");
-    }
-
-    @Test
-    @DisplayName("Simple for loop places blocks correctly")
-    void testSimpleForLoop() {
-        assertParseSucceed("""
-                for i in 0..5 {
-                  [i 36 1] stone
-                }
-                """);
-    }
-
-    @Test
-    @DisplayName("Nested loops create grid pattern")
-    void testNestedLoops() {
-        assertParseSucceed("""
-                for x in 0..3 {
-                  for z in 0..3 {
-                    [x 37 z] oak_planks
-                  }
-                }
-                """);
-    }
-
-    @Test
-    @DisplayName("Loop with arithmetic expressions")
-    void testLoopWithArithmetic() {
-        assertParseSucceed("""
-                for i in 0..5 {
-                  [i*2 38 0] diamond_block
-                }
-                """);
-    }
-
-    @Test
-    @DisplayName("Loop with variables")
-    void testLoopWithVariables() {
-        assertParseSucceed("""
-                offset = 5
-                for i in 0..3 {
-                  [i+offset 39 0] gold_block
-                }
-                """);
-    }
-
-    @Test
-    @DisplayName("Loop with negative range")
-    void testLoopWithNegativeRange() {
-        assertParseSucceed("""
-                for i in -5..5 {
-                  [i 40 0] emerald_block
-                }
-                """);
-    }
-
-    @Test
-    @DisplayName("Nested loops with negative ranges")
-    void testNestedLoopsWithNegativeRanges() {
-        assertParseSucceed("""
-                [0 36 0] grass_block
-                for i in -25..25 {
-                  for z in -25..25 {
-                    [i 28 z] stone
-                  }
-                }
-                """);
-    }
-
-    @Test
-    @DisplayName("Parse sphere macro syntax")
-    void testParseMacro() {
-        assertParseSucceed("#sphere .x=8 .radius=5 .block=stone");
-    }
-
-    @Test
-    @DisplayName("Parse and execute sphere macro")
-    void testCircleMacro() {
-        assertParseSucceed("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone");
-    }
-
-    @Test
-    @DisplayName("Occurrence definition can be referenced")
-    void testOccurrenceDefinitionAndReferenceParse() {
-        assertParseSucceed("""
-                repeat = @every .x=0 .y=4 .z=0
-                repeat {
-                  [0 0] oak_planks
-                }
-                """);
     }
 
     @PaintTest("""
@@ -306,7 +268,13 @@ final class ParserTest {
                 [0 tower_height 0] beacon
                 """;
 
-        assertParseSucceed(programSource);
+        MemorySegment programSegment = null;
+        try {
+            programSegment = PainterParser.parseString(programSource);
+            assertNotNull(programSegment, "Program should parse successfully");
+        } finally {
+            if (programSegment != null) PainterParser.freeProgram(programSegment);
+        }
     }
 
     @PaintTest("""
@@ -390,7 +358,13 @@ final class ParserTest {
                 }
                 """;
 
-        assertParseSucceed(program);
+        MemorySegment programSegment = null;
+        try {
+            programSegment = PainterParser.parseString(program);
+            assertNotNull(programSegment, "Program should parse successfully");
+        } finally {
+            if (programSegment != null) PainterParser.freeProgram(programSegment);
+        }
     }
 
     @PaintTest("""
@@ -526,7 +500,3 @@ final class ParserTest {
         assertTrue(paletteIndex(b, "diamond_block") >= 0 || paletteIndex(b, "diamond_block") == -1);
     }
 }
-
-
-
-
