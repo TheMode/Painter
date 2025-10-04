@@ -73,7 +73,7 @@ public final class PainterParser {
             if (hasError) {
                 MemorySegment errorMsg = Parser.error_message(parser);
                 String error = errorMsg.getString(0);
-                throw new RuntimeException("Parse error: " + error);
+                throw new RuntimeException(error);
             }
 
             return program;

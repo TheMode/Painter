@@ -33,6 +33,11 @@ final class ParserTest {
         return Stream.of(
                 Arguments.of("[0 0] air"),
                 Arguments.of("[1 50 0] oak_planks[facing=north,half=top]"),
+                Arguments.of("[x+1 z] oak_planks"),
+                Arguments.of("""
+                        [x z] oak_planks
+                        [x+1 z] oak_planks
+                        """),
                 Arguments.of("""
                         x = 5
                         [x 0] stone
@@ -499,4 +504,80 @@ final class ParserTest {
         // We'll at least assert palette contains air and not fail if palette contains other blocks
         assertTrue(paletteIndex(b, "diamond_block") >= 0 || paletteIndex(b, "diamond_block") == -1);
     }
+
+    // Exhaustive @every occurrence tests (moved from EveryOccurrenceTest)
+
+    @PaintTest("""
+            @every .x=2 .y=0 .z=0 {
+              [0 0 0] stone
+            }
+            """)
+    @DisplayName("@every with step in X axis places blocks at every 2 X positions")
+    void testEveryStepX2(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+
+        assertPaletteContains(section, "stone", "air");
+
+        assertBlockAt(section, 0, 0, 0, "stone");
+        assertBlockAt(section, 2, 0, 0, "stone");
+        assertBlockAt(section, 14, 0, 0, "stone");
+        assertBlockAt(section, 1, 0, 0, "air");
+    }
+
+    @PaintTest("""
+            @every .x=0 .y=0 .z=0 {
+              [0 0 0] gold_block
+            }
+            """)
+    @DisplayName("@every with zero steps executes exactly once")
+    void testEveryStepZeroExecutesOnce(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+
+        assertPaletteContains(section, "gold_block", "air");
+        assertBlockAt(section, 0, 0, 0, "gold_block");
+        assertBlockAt(section, 1, 0, 0, "air");
+    }
+
+    @PaintTest("""
+            repeat = @every .x=0 .y=4 .z=0
+            repeat {
+              [0 0] oak_planks
+            }
+            """)
+    @DisplayName("@every places blocks across multiple vertical sections")
+    void testEveryAcrossSections(ProgramContext ctx) {
+        PainterParser.SectionData s0 = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData s1 = ctx.generateSection(0, 1, 0);
+
+        assertPaletteContains(s0, "oak_planks", "air");
+
+        // Section 0 (base_y = 0) should contain placements at y=0,4,8,12
+        assertBlockAt(s0, 0, 0, 0, "oak_planks");
+        assertBlockAt(s0, 0, 4, 0, "oak_planks");
+        assertBlockAt(s0, 0, 8, 0, "oak_planks");
+        assertBlockAt(s0, 0, 12, 0, "oak_planks");
+
+        // Section 1 (base_y = 16) should contain placements at y=16,20 -> local y 0 and 4
+        assertBlockAt(s1, 0, 0, 0, "oak_planks");
+        assertBlockAt(s1, 0, 4, 0, "oak_planks");
+    }
+
+    @PaintTest("""
+            @every .x=0 .y=1 .z=0 {
+              [0 0] dirt
+            }
+            """)
+    @DisplayName("@every vertical unit step builds tower across many sections")
+    void testEveryVerticalFullHeight(ProgramContext ctx) {
+        // Generate a tall stack of sections from y=-4 to y=10 (many sections)
+        for (int sectionY = -4; sectionY <= 10; sectionY++) {
+            PainterParser.SectionData s = ctx.generateSection(0, sectionY, 0);
+
+            // For each local y in the section, ensure dirt appears at x=0,z=0
+            for (int localY = 0; localY < 16; localY++) {
+                ParserTest.assertBlockAt(s, 0, localY, 0, "dirt");
+            }
+        }
+    }
+
 }

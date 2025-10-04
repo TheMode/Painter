@@ -9,16 +9,16 @@
 // [0, 0, 0] minecraft:air
 
 // You can specify block states just like you would in a `setblock` command
-[1 0] oak_planks[facing=north,half=top,waterlogged=true]
-[2 0] oak_planks[facing=south,half=bottom,waterlogged=false]
+[1 0] oak_planks
+[2 0] oak_planks
 
 // You can use variables and simple arithmetic
 x = 3
 z = 0
-[x z] oak_planks[facing=east,half=top,waterlogged=true]
-[x+1 z] oak_planks[facing=west,half=bottom,waterlogged=false]
+[x z] oak_planks
+[x+1 z] oak_planks
 coord = [5 0]
-[coord] oak_planks[facing=north,half=top,waterlogged=true]
+[coord] oak_planks
 
 // Loops
 for i in 0..5 {
@@ -38,13 +38,13 @@ for i in 0..5 {
 
 repeat = @every .x=0 .y=4 .z=0
 repeat {
-  [0 0] oak_planks[facing=north,half=top,waterlogged=true]
-  [1 0] oak_planks[facing=south,half=bottom,waterlogged=false]
+  [0 0] oak_planks
+  [1 0] oak_planks
 }
 // Or:
 @every .x=0 .y=4 .z=0 {
-  [0 0] oak_planks[facing=north,half=top,waterlogged=true]
-  [1 0] oak_planks[facing=south,half=bottom,waterlogged=false]
+  [0 0] oak_planks
+  [1 0] oak_planks
 }
 
 tree = @noise .frequency=0.6 .seed=12345 .threshold=0.95
@@ -110,7 +110,7 @@ palette = {
   0: air
   1: dirt
   2: stone
-  3: oak_planks[facing=north,half=top,waterlogged=true]
+  3: oak_planks
 }
 
 // TODO: BASE64 section encoding

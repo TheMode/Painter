@@ -96,10 +96,21 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
   const int range_min_z = base_z - SEARCH_MARGIN;
   const int range_max_z = base_z + 15 + SEARCH_MARGIN;
 
+  /* The repetition grid for @every is defined relative to a global pattern
+   * origin (program origin). We compute anchor world-coordinates from that
+   * global origin and, for each section generation, convert them to local
+   * anchors relative to the section base so only anchors that fall into the
+   * current section are executed. Using a fixed pattern origin prevents the
+   * repetition grid from shifting per-section (which previously caused a
+   * copy of the tower in every section). */
+  const int pattern_origin_x = 0;
+  const int pattern_origin_y = 0;
+  const int pattern_origin_z = 0;
+
   int kx_start, kx_end, ky_start, ky_end, kz_start, kz_end;
-  compute_iteration_bounds(origin_x, step_x, range_min_x, range_max_x, &kx_start, &kx_end);
-  compute_iteration_bounds(origin_y, step_y, range_min_y, range_max_y, &ky_start, &ky_end);
-  compute_iteration_bounds(origin_z, step_z, range_min_z, range_max_z, &kz_start, &kz_end);
+  compute_iteration_bounds(pattern_origin_x, step_x, range_min_x, range_max_x, &kx_start, &kx_end);
+  compute_iteration_bounds(pattern_origin_y, step_y, range_min_y, range_max_y, &ky_start, &ky_end);
+  compute_iteration_bounds(pattern_origin_z, step_z, range_min_z, range_max_z, &kz_start, &kz_end);
 
   if (kx_start > kx_end || ky_start > ky_end || kz_start > kz_end) {
     return;
@@ -108,13 +119,20 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
   void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
   void *userdata = runtime->userdata;
 
-  int anchor_x = origin_x + step_x * kx_start;
-  for (int kx = kx_start; kx <= kx_end; ++kx, anchor_x += step_x) {
-    int anchor_y = origin_y + step_y * ky_start;
-    for (int ky = ky_start; ky <= ky_end; ++ky, anchor_y += step_y) {
-      int anchor_z = origin_z + step_z * kz_start;
-      for (int kz = kz_start; kz <= kz_end; ++kz, anchor_z += step_z) {
-        run_body(userdata, body, anchor_x, anchor_y, anchor_z);
+  /* Compute anchors in world-space using runtime base coordinates. These
+   * anchors are passed directly to run_body which expects world-space
+   * origin coordinates for executing the instruction body. */
+  for (int kx = kx_start; kx <= kx_end; ++kx) {
+    int anchor_world_x = pattern_origin_x + step_x * kx;
+    for (int ky = ky_start; ky <= ky_end; ++ky) {
+      int anchor_world_y = pattern_origin_y + step_y * ky;
+      for (int kz = kz_start; kz <= kz_end; ++kz) {
+        int anchor_world_z = pattern_origin_z + step_z * kz;
+
+        /* Call run_body with absolute world coordinates for the anchor. The
+         * runtime and process_instruction expect origin parameters to be
+         * world-space coordinates so the placements compute correctly. */
+        run_body(userdata, body, anchor_world_x, anchor_world_y, anchor_world_z);
       }
     }
   }

@@ -24,7 +24,7 @@ import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.*;
 
 public final class Demo {
-    private static final Logger logger = LoggerFactory.getLogger(Demo.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(Demo.class);
     private static final boolean ENABLE_FILE_WATCHER = Boolean.parseBoolean(
             System.getProperty("painter.enableFileWatcher", "true")
     );
@@ -46,7 +46,7 @@ public final class Demo {
         // Preload a simple waiting area
         waitingInstance.setGenerator(unit -> unit.modifier().fillHeight(0, 63, Block.BEDROCK));
         waitingInstance.loadChunk(0, 0).join();
-        logger.info("Created waiting instance for reload safety");
+        LOGGER.info("Created waiting instance for reload safety");
 
         // Load the initial painter program
         Path paintFile = Path.of("worlds", "tour.paint");
@@ -57,7 +57,7 @@ public final class Demo {
         instance.setGenerator(generator);
         instance.loadChunk(0, 0).join();
 
-        logger.info("Initial world generator loaded from: {}", paintFile);
+        LOGGER.info("Initial world generator loaded from: {}", paintFile);
 
         // Set up file watcher for automatic live reload during development
         PaintFileWatcher fileWatcher = null;
@@ -66,19 +66,19 @@ public final class Demo {
                 fileWatcher = new PaintFileWatcher(paintFile, (content, source) -> {
                     try {
                         GeneratorReloader.reload(instance, waitingInstance, content, source);
-                        logger.info("Auto-reloaded generator from file change");
+                        LOGGER.info("Auto-reloaded generator from file change");
 
                         // Notify all players
                         Audiences.players().sendMessage(text("✓ World generator auto-reloaded!", GREEN));
                         Audiences.players().sendMessage(text("All loaded chunks have been regenerated!", GRAY));
                     } catch (Exception e) {
-                        logger.error("Failed to auto-reload generator", e);
+                        LOGGER.error("Failed to auto-reload generator", e);
                         Audiences.players().sendMessage(text("✗ Auto-reload failed: " + e.getMessage(), RED));
                     }
                 });
-                logger.info("File watcher enabled - edits to {} will auto-reload", paintFile);
+                LOGGER.info("File watcher enabled - edits to {} will auto-reload", paintFile);
             } catch (IOException e) {
-                logger.warn("Failed to start file watcher", e);
+                LOGGER.warn("Failed to start file watcher", e);
             }
         }
 
@@ -87,7 +87,7 @@ public final class Demo {
             CommandManager commandManager = MinecraftServer.getCommandManager();
             commandManager.register(new ReloadCommand(instance, waitingInstance, paintFile));
             commandManager.register(new LoadPaintCommand(instance, waitingInstance));
-            logger.info("Commands registered: /reload, /loadpaint <url>");
+            LOGGER.info("Commands registered: /reload, /loadpaint <url>");
         }
 
         // Add an event callback to specify the spawning instance (and the spawn position)
@@ -132,7 +132,7 @@ public final class Demo {
         }));
 
         minecraftServer.start("0.0.0.0", 25565);
-        logger.info("Server started! Live reload features: file_watcher={}, commands={}",
+        LOGGER.info("Server started! Live reload features: file_watcher={}, commands={}",
                 ENABLE_FILE_WATCHER, ENABLE_LOAD_COMMANDS);
     }
 }

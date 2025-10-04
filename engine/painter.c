@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 // Forward declaration for bounds tracking
 static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range);
@@ -161,7 +162,11 @@ void parser_init(Parser *parser, const char *input) {
 void parser_error(Parser *parser, const char *message) {
   if (!parser->has_error) {
     parser->has_error = true;
-    snprintf(parser->error_message, sizeof(parser->error_message), "Parse error: %s", message);
+    // Include current line and column from the tokenizer to help locate parse errors
+    int line = parser->tokenizer.line;
+    int column = parser->tokenizer.column;
+    snprintf(parser->error_message, sizeof(parser->error_message), "Parse error (line %d, col %d): %s", line, column, message);
+    (void)0;
   }
 }
 
@@ -342,6 +347,31 @@ static Expression *parse_additive(Parser *parser) {
   if (!left) return NULL;
 
   while (peek_type() == TOKEN_PLUS || peek_type() == TOKEN_MINUS) {
+    // Decide whether '+'/'-' is a binary operator joining the left and
+    // right expressions, or whether it should be treated as the start of
+    // the next expression (e.g. a signed literal like "-1" used as the
+    // next coordinate). We treat it as the start of the next expression
+    // when the operator is preceded by whitespace in the source. This
+    // allows "[0 -1]" (space before '-') to be parsed as two values where
+    // the second is -1, but still allows "[x+1 z]" (no space before '+')
+    // to be parsed as a binary addition.
+    Token op_tok = peek();
+    if (op_tok.type == TOKEN_PLUS || op_tok.type == TOKEN_MINUS) {
+      Token next_tok = tokenizer_peek_next_token(&parser->tokenizer);
+      if (next_tok.type == TOKEN_NUMBER) {
+        const char *op_start = op_tok.start;
+        const char *inp = parser->tokenizer.input;
+        if (op_start > inp) {
+          char prev = *(op_start - 1);
+          if (prev == ' ' || prev == '\t' || prev == '\n' || prev == '\r' || prev == '\v' || prev == '\f') {
+            break; // treat as start of next expression (signed literal)
+          }
+        } else {
+          fprintf(stderr, "DEBUG parse_additive: op_start not > input start\n");
+        }
+      }
+    }
+
     BinaryOperator op = consume(TOKEN_PLUS) ? OP_ADD : OP_SUBTRACT;
     if (op != OP_ADD) consume(TOKEN_MINUS);
 
@@ -500,7 +530,6 @@ static BlockPlacement parse_block_placement(Parser *parser) {
   if (!expect_token(parser, TOKEN_LEFT_BRACKET, "Expected '[' for coordinate")) {
     return placement;
   }
-
   placement.coordinate = parse_coordinate(parser);
   if (!placement.coordinate) return placement;
 
@@ -536,7 +565,27 @@ static BlockPlacement parse_block_placement(Parser *parser) {
   placement.block_properties[0] = '\0';
   if (peek_type() == TOKEN_LEFT_BRACKET) {
     Token next_token = tokenizer_peek_next_token(&parser->tokenizer);
-    if (next_token.type == TOKEN_IDENTIFIER || next_token.type == TOKEN_RIGHT_BRACKET) {
+    // Only treat this as block properties if:
+    // 1. It's an empty bracket: []
+    // 2. It's an identifier followed by = (checked by peeking two tokens ahead)
+    bool is_block_properties = false;
+    if (next_token.type == TOKEN_RIGHT_BRACKET) {
+      is_block_properties = true;
+    } else if (next_token.type == TOKEN_IDENTIFIER) {
+      // Peek at the token after the identifier to see if it's '='
+      // We need to manually peek two tokens ahead
+      Tokenizer saved_state = parser->tokenizer;
+      tokenizer_next_token(&parser->tokenizer); // consume '['
+      tokenizer_next_token(&parser->tokenizer); // consume identifier
+      Token token_after_id = tokenizer_peek_token(&parser->tokenizer);
+      parser->tokenizer = saved_state; // restore state
+      
+      if (token_after_id.type == TOKEN_EQUAL) {
+        is_block_properties = true;
+      }
+    }
+    
+    if (is_block_properties) {
       next(); // consume '['
 
       size_t offset = 0;
@@ -1141,6 +1190,11 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   parser_error(parser, "Unexpected token");
+  // Debug: report current peek token
+  {
+    Token t = tokenizer_peek_token(&parser->tokenizer);
+    fprintf(stderr, "DEBUG parse_instruction: unexpected token=%s '%s' (line=%zu col=%zu)\n", token_type_to_string(t.type), t.value, parser->tokenizer.line, parser->tokenizer.column);
+  }
   free(instr);
   return NULL;
 }
