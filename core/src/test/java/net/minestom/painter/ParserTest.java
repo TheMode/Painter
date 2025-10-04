@@ -1,7 +1,6 @@
 package net.minestom.painter;
 
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -97,16 +96,16 @@ final class ParserTest {
                         tower_height = 50
                         radius = 5
                         spirals = 3
-
+                        
                         // Build the spiral
                         for y in 0..tower_height {
                           angle = y * spirals * 6.28 / tower_height
                           x = radius * cos(angle)
                           z = radius * sin(angle)
-
+                        
                           // Rainbow colors based on height
                           color_index = (y * 16) / tower_height
-
+                        
                           // Different blocks at different heights
                           if(y < tower_height / 3) {
                             [x y z] red_concrete
@@ -116,14 +115,14 @@ final class ParserTest {
                             [x y z] blue_concrete
                           }
                         }
-
+                        
                         // Add a base platform
                         for x in -10..10 {
                           for z in -10..10 {
                             [x -1 z] stone
                           }
                         }
-
+                        
                         // Place a beacon on top
                         [0 tower_height 0] beacon
                         """),
@@ -460,8 +459,6 @@ final class ParserTest {
         assertTrue(paletteIndex(b, "diamond_block") >= 0 || paletteIndex(b, "diamond_block") == -1);
     }
 
-    // Exhaustive @every occurrence tests (moved from EveryOccurrenceTest)
-
     @PaintTest("""
             @every .x=2 .y=0 .z=0 {
               [0 0 0] stone
@@ -534,5 +531,4 @@ final class ParserTest {
             }
         }
     }
-
 }
