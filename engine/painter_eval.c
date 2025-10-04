@@ -240,13 +240,16 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
     int section_y = state->base_y / 16;
     int section_z = state->base_z / 16;
     
-    // Calculate world-space bounds
-    int world_min_x = origin_x + occ->body.min_x;
-    int world_max_x = origin_x + occ->body.max_x;
-    int world_min_y = origin_y + occ->body.min_y;
-    int world_max_y = origin_y + occ->body.max_y;
-    int world_min_z = origin_z + occ->body.min_z;
-    int world_max_z = origin_z + occ->body.max_z;
+  // Calculate world-space bounds. The origin parameters are offsets relative
+  // to the current section base (state->base_*). Include state->base_* so
+  // the computed world bounds reflect the true world coordinates for this
+  // origin (which may be non-zero when checking neighboring sections).
+  int world_min_x = state->base_x + origin_x + occ->body.min_x;
+  int world_max_x = state->base_x + origin_x + occ->body.max_x;
+  int world_min_y = state->base_y + origin_y + occ->body.min_y;
+  int world_max_y = state->base_y + origin_y + occ->body.max_y;
+  int world_min_z = state->base_z + origin_z + occ->body.min_z;
+  int world_max_z = state->base_z + origin_z + occ->body.max_z;
     
     // Check intersection with current section
     int sec_min_x = state->base_x;
@@ -293,11 +296,18 @@ static void execute_occurrence_by_type(const char *type, const NamedArgumentList
   }
 
   OccurrenceRuntime runtime = {
-      .base_x = state->base_x,
-      .base_y = state->base_y,
-      .base_z = state->base_z,
-      .run_body = occurrence_runtime_run_body,
-      .userdata = state,
+    /* The runtime base coordinates should reflect the world-base of the
+     * section/origin the occurrence is being executed for. Many occurrence
+     * generators compute ranges relative to runtime->base and also receive
+     * an origin offset parameter; when processing occurrences coming from
+     * neighboring sections the origin parameters are non-zero, so we include
+     * origin_* to state->base_*. This ensures occurrences run with the
+     * correct world coordinates for the given origin. */
+    .base_x = state->base_x + origin_x,
+    .base_y = state->base_y + origin_y,
+    .base_z = state->base_z + origin_z,
+    .run_body = occurrence_runtime_run_body,
+    .userdata = state,
   };
 
   generator(state, args, body, origin_x, origin_y, origin_z, &runtime);

@@ -20,6 +20,7 @@ static Token read_number(Tokenizer *tokenizer);
 static Token read_string(Tokenizer *tokenizer);
 static Token read_raw_string(Tokenizer *tokenizer);
 static Token handle_single_char(Tokenizer *tokenizer);
+static Token handle_plus_minus(Tokenizer *tokenizer);
 static Token handle_equal(Tokenizer *tokenizer);
 static Token handle_bang(Tokenizer *tokenizer);
 static Token handle_less(Tokenizer *tokenizer);
@@ -49,8 +50,8 @@ static const TokenHandler token_handlers[256] = {
     [','] = handle_single_char,
     [';'] = handle_single_char,
     [':'] = handle_single_char,
-    ['+'] = handle_single_char,
-    ['-'] = handle_single_char,
+    ['+'] = handle_plus_minus,
+    ['-'] = handle_plus_minus,
     ['*'] = handle_single_char,
     ['/'] = handle_slash,
     ['='] = handle_equal,
@@ -230,6 +231,40 @@ static Token handle_single_char(Tokenizer *tokenizer) {
   const char *start = tokenizer->current;
   char c = next_char(tokenizer);
   return make_token(single_char_map[(unsigned char)c], start, 1);
+}
+
+// Handle '+' or '-' which may either be a standalone operator or a sign for a number
+static Token handle_plus_minus(Tokenizer *tokenizer) {
+  const char *start = tokenizer->current;
+  char sign = peek_char(tokenizer);
+
+  // If sign is followed by a digit, treat as a signed number token
+  const char next = tokenizer->current[1];
+  if (char_is_digit[(unsigned char)next]) {
+    // Consume the sign
+    next_char(tokenizer);
+
+    // Now consume the integer part
+    while (char_is_digit[(unsigned char)peek_char(tokenizer)]) {
+      next_char(tokenizer);
+    }
+
+    // Optional fractional part
+    if (peek_char(tokenizer) == '.') {
+      const char *look = tokenizer->current + 1;
+      if (char_is_digit[(unsigned char)*look]) {
+        next_char(tokenizer); // consume '.'
+        while (char_is_digit[(unsigned char)peek_char(tokenizer)]) {
+          next_char(tokenizer);
+        }
+      }
+    }
+
+    return make_token(TOKEN_NUMBER, start, tokenizer->current - start);
+  }
+
+  // Otherwise, treat as single-character operator
+  return handle_single_char(tokenizer);
 }
 
 static Token handle_equal(Tokenizer *tokenizer) {
