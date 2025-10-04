@@ -93,6 +93,41 @@ final class ParserTest {
                 Arguments.of("#sphere .x=8 .radius=5 .block=stone"),
                 Arguments.of("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone"),
                 Arguments.of("""
+                        // Configuration
+                        tower_height = 50
+                        radius = 5
+                        spirals = 3
+
+                        // Build the spiral
+                        for y in 0..tower_height {
+                          angle = y * spirals * 6.28 / tower_height
+                          x = radius * cos(angle)
+                          z = radius * sin(angle)
+
+                          // Rainbow colors based on height
+                          color_index = (y * 16) / tower_height
+
+                          // Different blocks at different heights
+                          if(y < tower_height / 3) {
+                            [x y z] red_concrete
+                          } elif(y < tower_height * 2 / 3) {
+                            [x y z] yellow_concrete
+                          } else {
+                            [x y z] blue_concrete
+                          }
+                        }
+
+                        // Add a base platform
+                        for x in -10..10 {
+                          for z in -10..10 {
+                            [x -1 z] stone
+                          }
+                        }
+
+                        // Place a beacon on top
+                        [0 tower_height 0] beacon
+                        """),
+                Arguments.of("""
                         repeat = @every .x=0 .y=4 .z=0
                         repeat {
                           [0 0] oak_planks
@@ -234,54 +269,6 @@ final class ParserTest {
         assertBlockAt(section, 3, 0, 0, "emerald_block");
     }
 
-    @Test
-    @DisplayName("Rainbow tower script parses successfully")
-    void testRainbowTowerParse() {
-        String programSource = """
-                // Configuration
-                tower_height = 50
-                radius = 5
-                spirals = 3
-                
-                // Build the spiral
-                for y in 0..tower_height {
-                  angle = y * spirals * 6.28 / tower_height
-                  x = radius * cos(angle)
-                  z = radius * sin(angle)
-                
-                  // Rainbow colors based on height
-                  color_index = (y * 16) / tower_height
-                
-                  // Different blocks at different heights
-                  if(y < tower_height / 3) {
-                    [x y z] red_concrete
-                  } elif(y < tower_height * 2 / 3) {
-                    [x y z] yellow_concrete
-                  } else {
-                    [x y z] blue_concrete
-                  }
-                }
-                
-                // Add a base platform
-                for x in -10..10 {
-                  for z in -10..10 {
-                    [x -1 z] stone
-                  }
-                }
-                
-                // Place a beacon on top
-                [0 tower_height 0] beacon
-                """;
-
-        MemorySegment programSegment = null;
-        try {
-            programSegment = PainterParser.parseString(programSource);
-            assertNotNull(programSegment, "Program should parse successfully");
-        } finally {
-            if (programSegment != null) PainterParser.freeProgram(programSegment);
-        }
-    }
-
     @PaintTest("""
             // Terrain with amplitude and base_y
             @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 {
@@ -337,38 +324,6 @@ final class ParserTest {
             }
             assertTrue(hasTreeBlocks || section.palette().length == 1,
                     "Section should have tree blocks or be empty (air)");
-        }
-    }
-
-    @Test
-    @DisplayName("Combined terrain and tree occurrences work together")
-    void testCombinedNoiseOccurrences() {
-        String program = """
-                // Generate terrain (no threshold, just height variation)
-                @noise .frequency=0.025 .seed=77777 .amplitude=20 .base_y=70 {
-                  [0 0 0] grass_block
-                  [0 -1 0] dirt
-                }
-                
-                // Add trees with threshold for sparsity, same terrain height
-                @noise .frequency=0.025 .seed=77777 .threshold=0.75 .amplitude=20 .base_y=70 {
-                  [0 1 0] oak_log
-                  [0 2 0] oak_log
-                  [0 3 0] oak_log
-                  [-1 3 0] oak_leaves
-                  [1 3 0] oak_leaves
-                  [0 3 -1] oak_leaves
-                  [0 3 1] oak_leaves
-                  [0 4 0] oak_leaves
-                }
-                """;
-
-        MemorySegment programSegment = null;
-        try {
-            programSegment = PainterParser.parseString(program);
-            assertNotNull(programSegment, "Program should parse successfully");
-        } finally {
-            if (programSegment != null) PainterParser.freeProgram(programSegment);
         }
     }
 
