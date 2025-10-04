@@ -131,6 +131,8 @@ typedef struct BlockPlacement {
 typedef struct Assignment {
   char name[MAX_TOKEN_VALUE_LENGTH];
   Expression *value;
+  bool is_palette_definition;
+  PaletteDefinition *palette_definition;
 } Assignment;
 
 // For loop: for var in start..end { instructions }
@@ -215,7 +217,6 @@ typedef enum {
   INSTR_ASSIGNMENT,
   INSTR_FOR_LOOP,
   INSTR_OCCURRENCE,
-  INSTR_PALETTE_DEFINITION,
   INSTR_MACRO_CALL,
   INSTR_IF_STATEMENT,
 } InstructionType;
@@ -227,7 +228,6 @@ typedef struct Instruction {
     Assignment assignment;
     ForLoop for_loop;
     Occurrence occurrence;
-    PaletteDefinition palette_definition;
     MacroCall macro_call;
     IfStatement if_statement;
   };
@@ -259,7 +259,14 @@ typedef struct {
 // Variable context for tracking values during execution
 typedef struct Variable {
   char name[MAX_TOKEN_VALUE_LENGTH];
-  double value;
+  enum {
+    VAR_NUMBER,
+    VAR_PALETTE,
+  } type;
+  union {
+    double value;
+    PaletteDefinition *palette;
+  } v;
 } Variable;
 
 struct VariableContext {
@@ -397,6 +404,8 @@ PAINTER_API void context_init(VariableContext *ctx);
 PAINTER_API void context_free(VariableContext *ctx);
 PAINTER_API void context_set(VariableContext *ctx, const char *name, double value);
 PAINTER_API double context_get(VariableContext *ctx, const char *name);
+PAINTER_API void context_set_palette(VariableContext *ctx, const char *name, const PaletteDefinition *definition);
+PAINTER_API PaletteDefinition *context_get_palette(VariableContext *ctx, const char *name);
 
 // Helper function to get named argument by name
 PAINTER_API Expression *named_arg_get(const NamedArgumentList *args, const char *name);

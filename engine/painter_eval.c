@@ -13,7 +13,6 @@ static void execute_occurrence_instruction(const Occurrence *occurrence, Executi
 static bool instruction_might_affect_section(Instruction *instr, ExecutionState *state, int origin_x, int origin_y, int origin_z);
 static bool evaluate_block_position(const BlockPlacement *placement, ExecutionState *state, int origin_x, int origin_y, int origin_z,
     int *world_x, int *world_y, int *world_z);
-static void apply_palette_definition(ExecutionState *state, const PaletteDefinition *definition);
 static void clear_runtime_palette(ExecutionState *state);
 static bool ensure_runtime_palette_capacity(ExecutionState *state, size_t required_capacity);
 static int calculate_bits_per_entry(int palette_size);
@@ -93,35 +92,6 @@ static void clear_runtime_palette(ExecutionState *state) {
     (*state->palette)[i] = NULL;
   }
   *state->palette_size = 0;
-}
-
-// Apply palette definition
-static void apply_palette_definition(ExecutionState *state, const PaletteDefinition *definition) {
-  if (!state || !definition) {
-    return;
-  }
-
-  clear_runtime_palette(state);
-
-  if (!ensure_runtime_palette_capacity(state, definition->entries.count)) {
-    return;
-  }
-
-  for (size_t i = 0; i < definition->entries.count; i++) {
-    const PaletteEntry *entry = &definition->entries.items[i];
-    char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
-    painter_format_block(block_string, sizeof(block_string), entry->block_name, entry->block_properties);
-
-    size_t length = strlen(block_string);
-    char *copy = malloc(length + 1);
-    if (!copy) {
-      return;
-    }
-    memcpy(copy, block_string, length + 1);
-
-    (*state->palette)[i] = copy;
-    *state->palette_size = (int)(i + 1);
-  }
 }
 
 // Evaluate block position
@@ -234,23 +204,23 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
       // No bounds info, conservatively assume it might affect this section
       return true;
     }
-    
+
     // Check if the occurrence's bounding box (offset by origin) intersects current section
     int section_x = state->base_x / 16;
     int section_y = state->base_y / 16;
     int section_z = state->base_z / 16;
-    
-  // Calculate world-space bounds. The origin parameters are offsets relative
-  // to the current section base (state->base_*). Include state->base_* so
-  // the computed world bounds reflect the true world coordinates for this
-  // origin (which may be non-zero when checking neighboring sections).
-  int world_min_x = state->base_x + origin_x + occ->body.min_x;
-  int world_max_x = state->base_x + origin_x + occ->body.max_x;
-  int world_min_y = state->base_y + origin_y + occ->body.min_y;
-  int world_max_y = state->base_y + origin_y + occ->body.max_y;
-  int world_min_z = state->base_z + origin_z + occ->body.min_z;
-  int world_max_z = state->base_z + origin_z + occ->body.max_z;
-    
+
+    // Calculate world-space bounds. The origin parameters are offsets relative
+    // to the current section base (state->base_*). Include state->base_* so
+    // the computed world bounds reflect the true world coordinates for this
+    // origin (which may be non-zero when checking neighboring sections).
+    int world_min_x = state->base_x + origin_x + occ->body.min_x;
+    int world_max_x = state->base_x + origin_x + occ->body.max_x;
+    int world_min_y = state->base_y + origin_y + occ->body.min_y;
+    int world_max_y = state->base_y + origin_y + occ->body.max_y;
+    int world_min_z = state->base_z + origin_z + occ->body.min_z;
+    int world_max_z = state->base_z + origin_z + occ->body.max_z;
+
     // Check intersection with current section
     int sec_min_x = state->base_x;
     int sec_max_x = state->base_x + 15;
@@ -258,9 +228,8 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
     int sec_max_y = state->base_y + 15;
     int sec_min_z = state->base_z;
     int sec_max_z = state->base_z + 15;
-    
-    return !(world_max_x < sec_min_x || world_min_x > sec_max_x ||
-             world_max_y < sec_min_y || world_min_y > sec_max_y ||
+
+    return !(world_max_x < sec_min_x || world_min_x > sec_max_x || world_max_y < sec_min_y || world_min_y > sec_max_y ||
              world_max_z < sec_min_z || world_min_z > sec_max_z);
   }
   default: return true;
@@ -296,18 +265,18 @@ static void execute_occurrence_by_type(const char *type, const NamedArgumentList
   }
 
   OccurrenceRuntime runtime = {
-    /* The runtime base coordinates should reflect the world-base of the
+      /* The runtime base coordinates should reflect the world-base of the
      * section/origin the occurrence is being executed for. Many occurrence
      * generators compute ranges relative to runtime->base and also receive
      * an origin offset parameter; when processing occurrences coming from
      * neighboring sections the origin parameters are non-zero, so we include
      * origin_* to state->base_*. This ensures occurrences run with the
      * correct world coordinates for the given origin. */
-    .base_x = state->base_x + origin_x,
-    .base_y = state->base_y + origin_y,
-    .base_z = state->base_z + origin_z,
-    .run_body = occurrence_runtime_run_body,
-    .userdata = state,
+      .base_x = state->base_x + origin_x,
+      .base_y = state->base_y + origin_y,
+      .base_z = state->base_z + origin_z,
+      .run_body = occurrence_runtime_run_body,
+      .userdata = state,
   };
 
   generator(state, args, body, origin_x, origin_y, origin_z, &runtime);
@@ -372,13 +341,6 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
     if (palette_index >= 0) {
       state->block_indices[block_index] = palette_index;
     }
-    break;
-  }
-
-  case INSTR_ASSIGNMENT: {
-    Assignment *assignment = &instr->assignment;
-    double value = painter_evaluate_expression(assignment->value, state);
-    context_set(state->variables, assignment->name, value);
     break;
   }
 
@@ -447,7 +409,16 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
     break;
   }
 
-  case INSTR_PALETTE_DEFINITION: apply_palette_definition(state, &instr->palette_definition); break;
+  case INSTR_ASSIGNMENT: {
+    if (instr->assignment.is_palette_definition) {
+      context_set_palette(state->variables, instr->assignment.name, instr->assignment.palette_definition);
+    } else {
+      Assignment *assignment = &instr->assignment;
+      double value = painter_evaluate_expression(assignment->value, state);
+      context_set(state->variables, assignment->name, value);
+    }
+    break;
+  }
   }
 }
 
@@ -515,23 +486,23 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
     }
     process_instruction(instr, &state, 0, 0, 0);
   }
-  
+
   // Check for occurrences from neighboring sections that might affect this section
   // This enables cross-section structures like trees
   for (int dx = -1; dx <= 1; dx++) {
     for (int dy = -1; dy <= 1; dy++) {
       for (int dz = -1; dz <= 1; dz++) {
         if (dx == 0 && dy == 0 && dz == 0) continue; // Skip current section (already processed)
-        
+
         // Calculate origin offset for neighboring section
         int neighbor_origin_x = dx * 16;
         int neighbor_origin_y = dy * 16;
         int neighbor_origin_z = dz * 16;
-        
+
         // Check each instruction to see if it might affect current section from neighbor
         for (int i = 0; i < program->instruction_count; i++) {
           Instruction *instr = program->instructions[i];
-          
+
           // Only check occurrences (as they're the ones that span sections)
           if (instr->type == INSTR_OCCURRENCE) {
             if (instruction_might_affect_section(instr, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z)) {
@@ -674,4 +645,3 @@ bool painter_section_clip_aabb(const ExecutionState *state, PainterAABB *box) {
 
   return true;
 }
-

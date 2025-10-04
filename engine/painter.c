@@ -1090,11 +1090,21 @@ static Instruction *parse_instruction(Parser *parser) {
     if (consume(TOKEN_EQUAL)) {
       // Check if this is a palette definition or occurrence assignment
       if (peek_type() == TOKEN_LEFT_BRACE) {
-        instr->type = INSTR_PALETTE_DEFINITION;
-        strncpy(instr->palette_definition.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-        instr->palette_definition.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-        instr->palette_definition = parse_palette_definition(parser);
-        strncpy(instr->palette_definition.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+        instr->type = INSTR_ASSIGNMENT;
+        strncpy(instr->assignment.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+        instr->assignment.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+        instr->assignment.is_palette_definition = true;
+        PaletteDefinition tmp = parse_palette_definition(parser);
+        PaletteDefinition *heap_def = malloc(sizeof(PaletteDefinition));
+        if (!heap_def) {
+          parser_error(parser, "Out of memory");
+          free(instr);
+          return NULL;
+        }
+        *heap_def = tmp;
+        strncpy(heap_def->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+        heap_def->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+        instr->assignment.palette_definition = heap_def;
         if (parser->has_error) {
           free(instr);
           return NULL;
@@ -1252,7 +1262,20 @@ void instruction_free(Instruction *instr) {
 
   switch (instr->type) {
   case INSTR_BLOCK_PLACEMENT: expression_free(instr->block_placement.coordinate); break;
-  case INSTR_ASSIGNMENT: expression_free(instr->assignment.value); break;
+  case INSTR_ASSIGNMENT:
+    if (instr->assignment.is_palette_definition) {
+      if (instr->assignment.palette_definition) {
+        for (size_t i = 0; i < instr->assignment.palette_definition->entries.count; i++) {
+          /* nothing to free inside entries (they are fixed-size arrays), but free items array */
+        }
+        free(instr->assignment.palette_definition->entries.items);
+        free(instr->assignment.palette_definition);
+        instr->assignment.palette_definition = NULL;
+      }
+    } else {
+      expression_free(instr->assignment.value);
+    }
+    break;
   case INSTR_FOR_LOOP:
     expression_free(instr->for_loop.start);
     expression_free(instr->for_loop.end);
@@ -1283,7 +1306,6 @@ void instruction_free(Instruction *instr) {
     }
     free(instr->occurrence.body.items);
     break;
-  case INSTR_PALETTE_DEFINITION: free(instr->palette_definition.entries.items); break;
   case INSTR_MACRO_CALL:
     for (size_t i = 0; i < instr->macro_call.arguments.count; i++) {
       expression_free(instr->macro_call.arguments.items[i].value);
@@ -1514,6 +1536,15 @@ void context_init(VariableContext *ctx) {
 }
 
 void context_free(VariableContext *ctx) {
+  if (!ctx) return;
+  for (size_t i = 0; i < ctx->variable_count; i++) {
+    if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
+      // free palette entries
+      free(ctx->variables[i].v.palette->entries.items);
+      free(ctx->variables[i].v.palette);
+      ctx->variables[i].v.palette = NULL;
+    }
+  }
   free(ctx->variables);
   ctx->variables = NULL;
   ctx->variable_capacity = 0;
@@ -1524,7 +1555,8 @@ void context_set(VariableContext *ctx, const char *name, double value) {
   // Check if variable already exists
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
-      ctx->variables[i].value = value;
+      ctx->variables[i].type = VAR_NUMBER;
+      ctx->variables[i].v.value = value;
       return;
     }
   }
@@ -1537,13 +1569,90 @@ void context_set(VariableContext *ctx, const char *name, double value) {
   Variable *variable = &ctx->variables[ctx->variable_count++];
   strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   variable->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  variable->value = value;
+  variable->type = VAR_NUMBER;
+  variable->v.value = value;
+}
+
+void context_set_palette(VariableContext *ctx, const char *name, const PaletteDefinition *definition) {
+  if (!ctx || !name || !definition) return;
+
+  // Find existing
+  for (size_t i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0) {
+      // free old palette if present
+      if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
+        free(ctx->variables[i].v.palette->entries.items);
+        free(ctx->variables[i].v.palette);
+      }
+      PaletteDefinition *copy = malloc(sizeof(PaletteDefinition));
+      if (!copy) return;
+      *copy = *definition;
+      // deep-copy entries array
+      if (definition->entries.count > 0) {
+        size_t bytes = sizeof(PaletteEntry) * definition->entries.count;
+        copy->entries.items = malloc(bytes);
+        if (!copy->entries.items) { free(copy); return; }
+        memcpy(copy->entries.items, definition->entries.items, bytes);
+        copy->entries.count = definition->entries.count;
+        copy->entries.capacity = definition->entries.count;
+      } else {
+        copy->entries.items = NULL;
+        copy->entries.count = 0;
+        copy->entries.capacity = 0;
+      }
+      ctx->variables[i].type = VAR_PALETTE;
+      ctx->variables[i].v.palette = copy;
+      return;
+    }
+  }
+
+  // Add new variable
+  if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity, ctx->variable_count, sizeof(*ctx->variables))) {
+    return;
+  }
+
+  Variable *variable = &ctx->variables[ctx->variable_count++];
+  strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  variable->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  PaletteDefinition *copy = malloc(sizeof(PaletteDefinition));
+  if (!copy) return;
+  *copy = *definition;
+  if (definition->entries.count > 0) {
+    size_t bytes = sizeof(PaletteEntry) * definition->entries.count;
+    copy->entries.items = malloc(bytes);
+    if (!copy->entries.items) { free(copy); return; }
+    memcpy(copy->entries.items, definition->entries.items, bytes);
+    copy->entries.count = definition->entries.count;
+    copy->entries.capacity = definition->entries.count;
+  } else {
+    copy->entries.items = NULL;
+    copy->entries.count = 0;
+    copy->entries.capacity = 0;
+  }
+  variable->type = VAR_PALETTE;
+  variable->v.palette = copy;
+}
+
+PaletteDefinition *context_get_palette(VariableContext *ctx, const char *name) {
+  if (!ctx || !name) return NULL;
+  for (size_t i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0 && ctx->variables[i].type == VAR_PALETTE) {
+      return ctx->variables[i].v.palette;
+    }
+  }
+  return NULL;
 }
 
 double context_get(VariableContext *ctx, const char *name) {
+  if (!ctx || !name) return 0.0;
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
-      return ctx->variables[i].value;
+      if (ctx->variables[i].type == VAR_NUMBER) {
+        return ctx->variables[i].v.value;
+      } else {
+        // Requested name exists but is not a numeric variable
+        return 0.0;
+      }
     }
   }
   return 0.0;
