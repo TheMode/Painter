@@ -228,6 +228,38 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
     }
     return painter_section_contains_point(state, world_x, world_y, world_z);
   }
+  case INSTR_OCCURRENCE: {
+    const Occurrence *occ = &instr->occurrence;
+    if (!occ->body.has_bounds) {
+      // No bounds info, conservatively assume it might affect this section
+      return true;
+    }
+    
+    // Check if the occurrence's bounding box (offset by origin) intersects current section
+    int section_x = state->base_x / 16;
+    int section_y = state->base_y / 16;
+    int section_z = state->base_z / 16;
+    
+    // Calculate world-space bounds
+    int world_min_x = origin_x + occ->body.min_x;
+    int world_max_x = origin_x + occ->body.max_x;
+    int world_min_y = origin_y + occ->body.min_y;
+    int world_max_y = origin_y + occ->body.max_y;
+    int world_min_z = origin_z + occ->body.min_z;
+    int world_max_z = origin_z + occ->body.max_z;
+    
+    // Check intersection with current section
+    int sec_min_x = state->base_x;
+    int sec_max_x = state->base_x + 15;
+    int sec_min_y = state->base_y;
+    int sec_max_y = state->base_y + 15;
+    int sec_min_z = state->base_z;
+    int sec_max_z = state->base_z + 15;
+    
+    return !(world_max_x < sec_min_x || world_min_x > sec_max_x ||
+             world_max_y < sec_min_y || world_min_y > sec_max_y ||
+             world_max_z < sec_min_z || world_min_z > sec_max_z);
+  }
   default: return true;
   }
 }
@@ -465,12 +497,40 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
     goto cleanup;
   }
 
+  // Process all instructions from origin [0, 0, 0]
   for (int i = 0; i < program->instruction_count; i++) {
     Instruction *instr = program->instructions[i];
     if (!instruction_might_affect_section(instr, &state, 0, 0, 0)) {
       continue;
     }
     process_instruction(instr, &state, 0, 0, 0);
+  }
+  
+  // Check for occurrences from neighboring sections that might affect this section
+  // This enables cross-section structures like trees
+  for (int dx = -1; dx <= 1; dx++) {
+    for (int dy = -1; dy <= 1; dy++) {
+      for (int dz = -1; dz <= 1; dz++) {
+        if (dx == 0 && dy == 0 && dz == 0) continue; // Skip current section (already processed)
+        
+        // Calculate origin offset for neighboring section
+        int neighbor_origin_x = dx * 16;
+        int neighbor_origin_y = dy * 16;
+        int neighbor_origin_z = dz * 16;
+        
+        // Check each instruction to see if it might affect current section from neighbor
+        for (int i = 0; i < program->instruction_count; i++) {
+          Instruction *instr = program->instructions[i];
+          
+          // Only check occurrences (as they're the ones that span sections)
+          if (instr->type == INSTR_OCCURRENCE) {
+            if (instruction_might_affect_section(instr, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z)) {
+              process_instruction(instr, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z);
+            }
+          }
+        }
+      }
+    }
   }
 
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);

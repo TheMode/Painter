@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Forward declaration for bounds tracking
+static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range);
+
 // -----------------------------------------------------------------------------
 // Internal utility helpers
 // -----------------------------------------------------------------------------
@@ -36,6 +39,10 @@ static inline void instruction_list_reset(InstructionList *list) {
   list->items = NULL;
   list->count = 0;
   list->capacity = 0;
+  list->has_bounds = false;
+  list->min_x = list->max_x = 0;
+  list->min_y = list->max_y = 0;
+  list->min_z = list->max_z = 0;
 }
 
 static inline void expression_list_reset(ExpressionList *list) {
@@ -61,6 +68,8 @@ static bool instruction_list_push(Parser *parser, InstructionList *list, Instruc
     return false;
   }
   list->items[list->count++] = instr;
+  // Update bounds with conservative range of 100 blocks (adjustable)
+  update_instruction_bounds(list, instr, 100);
   return true;
 }
 
@@ -140,6 +149,7 @@ static Occurrence parse_occurrence_definition(Parser *parser, const char *name);
 static Occurrence parse_occurrence_reference(Parser *parser, const char *name);
 static PaletteDefinition parse_palette_definition(Parser *parser);
 static MacroCall parse_macro_call(Parser *parser);
+static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range);
 
 // Parser initialization
 void parser_init(Parser *parser, const char *input) {
@@ -1547,4 +1557,189 @@ Expression *named_arg_get(const NamedArgumentList *args, const char *name) {
     }
   }
   return NULL;
+}
+
+// Bounding box helpers for InstructionList
+void instruction_list_init_bounds(InstructionList *list) {
+  if (!list) return;
+  list->has_bounds = true;
+  list->min_x = list->max_x = 0;
+  list->min_y = list->max_y = 0;
+  list->min_z = list->max_z = 0;
+}
+
+void instruction_list_expand_bounds(InstructionList *list, int x, int y, int z) {
+  if (!list) return;
+  
+  if (!list->has_bounds) {
+    list->has_bounds = true;
+    list->min_x = list->max_x = x;
+    list->min_y = list->max_y = y;
+    list->min_z = list->max_z = z;
+  } else {
+    if (x < list->min_x) list->min_x = x;
+    if (x > list->max_x) list->max_x = x;
+    if (y < list->min_y) list->min_y = y;
+    if (y > list->max_y) list->max_y = y;
+    if (z < list->min_z) list->min_z = z;
+    if (z > list->max_z) list->max_z = z;
+  }
+}
+
+void instruction_list_merge_bounds(InstructionList *dest, const InstructionList *src) {
+  if (!dest || !src || !src->has_bounds) return;
+  
+  if (!dest->has_bounds) {
+    dest->has_bounds = true;
+    dest->min_x = src->min_x;
+    dest->max_x = src->max_x;
+    dest->min_y = src->min_y;
+    dest->max_y = src->max_y;
+    dest->min_z = src->min_z;
+    dest->max_z = src->max_z;
+  } else {
+    if (src->min_x < dest->min_x) dest->min_x = src->min_x;
+    if (src->max_x > dest->max_x) dest->max_x = src->max_x;
+    if (src->min_y < dest->min_y) dest->min_y = src->min_y;
+    if (src->max_y > dest->max_y) dest->max_y = src->max_y;
+    if (src->min_z < dest->min_z) dest->min_z = src->min_z;
+    if (src->max_z > dest->max_z) dest->max_z = src->max_z;
+  }
+}
+
+bool instruction_list_intersects_section(const InstructionList *list, int section_x, int section_y, int section_z) {
+  if (!list || !list->has_bounds) return false;
+  
+  // Convert section coordinates to world coordinates
+  const int base_x = section_x * 16;
+  const int base_y = section_y * 16;
+  const int base_z = section_z * 16;
+  const int max_x = base_x + 15;
+  const int max_y = base_y + 15;
+  const int max_z = base_z + 15;
+  
+  // Check if bounding boxes intersect
+  return !(list->max_x < base_x || list->min_x > max_x ||
+           list->max_y < base_y || list->min_y > max_y ||
+           list->max_z < base_z || list->min_z > max_z);
+}
+
+// Helper to estimate bounds from an expression (conservative estimate for non-literals)
+static void estimate_expression_bounds(const Expression *expr, int *min_val, int *max_val, int conservative_range) {
+  if (!expr) {
+    *min_val = *max_val = 0;
+    return;
+  }
+  
+  switch (expr->type) {
+    case EXPR_NUMBER:
+      *min_val = *max_val = (int)expr->number;
+      break;
+    case EXPR_IDENTIFIER:
+    case EXPR_FUNCTION_CALL:
+      // For unknowns, use conservative range
+      *min_val = -conservative_range;
+      *max_val = conservative_range;
+      break;
+    case EXPR_BINARY_OP: {
+      int left_min, left_max, right_min, right_max;
+      estimate_expression_bounds(expr->binary.left, &left_min, &left_max, conservative_range);
+      estimate_expression_bounds(expr->binary.right, &right_min, &right_max, conservative_range);
+      
+      switch (expr->binary.op) {
+        case OP_ADD:
+          *min_val = left_min + right_min;
+          *max_val = left_max + right_max;
+          break;
+        case OP_SUBTRACT:
+          *min_val = left_min - right_max;
+          *max_val = left_max - right_min;
+          break;
+        case OP_MULTIPLY:
+          // Take the extremes
+          *min_val = left_min * right_min;
+          *max_val = left_max * right_max;
+          if (left_min * right_max < *min_val) *min_val = left_min * right_max;
+          if (left_max * right_min < *min_val) *min_val = left_max * right_min;
+          if (left_min * right_max > *max_val) *max_val = left_min * right_max;
+          if (left_max * right_min > *max_val) *max_val = left_max * right_min;
+          break;
+        default:
+          // For comparisons and other ops, use conservative range
+          *min_val = -conservative_range;
+          *max_val = conservative_range;
+          break;
+      }
+      break;
+    }
+    case EXPR_UNARY_OP:
+      estimate_expression_bounds(expr->unary.operand, min_val, max_val, conservative_range);
+      if (expr->unary.op == OP_NEGATE) {
+        int tmp = *min_val;
+        *min_val = -*max_val;
+        *max_val = -tmp;
+      }
+      break;
+    default:
+      *min_val = -conservative_range;
+      *max_val = conservative_range;
+      break;
+  }
+}
+
+// Update instruction list bounds based on an instruction
+static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range) {
+  if (!list || !instr) return;
+  
+  switch (instr->type) {
+    case INSTR_BLOCK_PLACEMENT: {
+      const BlockPlacement *placement = &instr->block_placement;
+      if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
+        int x_min, x_max, y_min, y_max, z_min, z_max;
+        estimate_expression_bounds(placement->coordinate->coordinate.x, &x_min, &x_max, conservative_range);
+        
+        if (placement->coordinate->coordinate.y) {
+          estimate_expression_bounds(placement->coordinate->coordinate.y, &y_min, &y_max, conservative_range);
+        } else {
+          y_min = y_max = 0;
+        }
+        
+        if (placement->coordinate->coordinate.z) {
+          estimate_expression_bounds(placement->coordinate->coordinate.z, &z_min, &z_max, conservative_range);
+        } else {
+          z_min = z_max = 0;
+        }
+        
+        instruction_list_expand_bounds(list, x_min, y_min, z_min);
+        instruction_list_expand_bounds(list, x_max, y_max, z_max);
+      }
+      break;
+    }
+    case INSTR_FOR_LOOP: {
+      const ForLoop *loop = &instr->for_loop;
+      if (loop->body.has_bounds) {
+        // Merge loop body bounds (potentially expanded by loop range)
+        instruction_list_merge_bounds(list, &loop->body);
+      }
+      break;
+    }
+    case INSTR_IF_STATEMENT: {
+      const IfStatement *if_stmt = &instr->if_statement;
+      for (size_t i = 0; i < if_stmt->branch_count; i++) {
+        if (if_stmt->branches[i].body.has_bounds) {
+          instruction_list_merge_bounds(list, &if_stmt->branches[i].body);
+        }
+      }
+      break;
+    }
+    case INSTR_OCCURRENCE: {
+      const Occurrence *occ = &instr->occurrence;
+      if (occ->body.has_bounds) {
+        instruction_list_merge_bounds(list, &occ->body);
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }

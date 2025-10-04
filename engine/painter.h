@@ -46,6 +46,12 @@ typedef struct {
   Instruction **items;
   size_t count;
   size_t capacity;
+  // Bounding box for potential effects (in local coordinates)
+  // Used to determine if this instruction list might affect neighboring sections
+  bool has_bounds;
+  int min_x, max_x;
+  int min_y, max_y;
+  int min_z, max_z;
 } InstructionList;
 
 typedef struct {
@@ -394,3 +400,9 @@ PAINTER_API double context_get(VariableContext *ctx, const char *name);
 
 // Helper function to get named argument by name
 PAINTER_API Expression *named_arg_get(const NamedArgumentList *args, const char *name);
+
+// Bounding box helpers for InstructionList
+PAINTER_API void instruction_list_init_bounds(InstructionList *list);
+PAINTER_API void instruction_list_expand_bounds(InstructionList *list, int x, int y, int z);
+PAINTER_API void instruction_list_merge_bounds(InstructionList *dest, const InstructionList *src);
+PAINTER_API bool instruction_list_intersects_section(const InstructionList *list, int section_x, int section_y, int section_z);
