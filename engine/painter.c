@@ -1,3 +1,6 @@
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 #include "painter.h"
 #include "builtin_functions.h"
 #include "builtin_macros.h"
@@ -9,6 +12,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static inline void safe_strncpy(char *dst, const char *src, size_t dst_size) {
+  if (!dst || dst_size == 0) return;
+  if (!src) {
+    dst[0] = '\0';
+    return;
+  }
+  size_t len = strlen(src);
+  if (len >= dst_size) len = dst_size - 1;
+  memcpy(dst, src, len);
+  dst[len] = '\0';
+}
 
 // Forward declaration for bounds tracking
 static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range);
@@ -96,7 +111,7 @@ static PaletteDefinition *palette_definition_clone(const PaletteDefinition *defi
   if (!copy) return NULL;
 
   *copy = (PaletteDefinition){0};
-  strncpy(copy->name, definition->name, sizeof(copy->name) - 1);
+  safe_strncpy(copy->name, definition->name, sizeof(copy->name));
   if (!palette_entry_list_copy(&copy->entries, &definition->entries)) {
     free(copy);
     return NULL;
@@ -287,8 +302,7 @@ static inline Expression *make_identifier(const char *name) {
   Expression *expr = malloc(sizeof(Expression));
   if (expr) {
     expr->type = EXPR_IDENTIFIER;
-    strncpy(expr->identifier, name, MAX_TOKEN_VALUE_LENGTH - 1);
-    expr->identifier[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    safe_strncpy(expr->identifier, name, MAX_TOKEN_VALUE_LENGTH);
   }
   return expr;
 }
@@ -573,8 +587,7 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
   if (!expr) return NULL;
 
   expr->type = EXPR_FUNCTION_CALL;
-  strncpy(expr->function_call.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  expr->function_call.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(expr->function_call.name, name, MAX_TOKEN_VALUE_LENGTH);
   expression_list_init(&expr->function_call.args);
 
   // Parse arguments if any
@@ -620,8 +633,7 @@ static BlockPlacement parse_block_placement(Parser *parser) {
     return placement;
   }
 
-  strncpy(placement.block_name, name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  placement.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(placement.block_name, name_token.value, MAX_TOKEN_VALUE_LENGTH);
   next();
 
   // Check for namespace separator (:)
@@ -635,8 +647,8 @@ static BlockPlacement parse_block_placement(Parser *parser) {
     size_t current_len = strlen(placement.block_name);
     if (current_len < MAX_TOKEN_VALUE_LENGTH - 1) {
       placement.block_name[current_len] = ':';
-      strncpy(placement.block_name + current_len + 1, ns_token.value, MAX_TOKEN_VALUE_LENGTH - current_len - 2);
-      placement.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+      /* copy remaining namespace segment safely into the buffer */
+      safe_strncpy(placement.block_name + current_len + 1, ns_token.value, MAX_TOKEN_VALUE_LENGTH - current_len - 1);
     }
     next();
   }
@@ -674,8 +686,8 @@ static BlockPlacement parse_block_placement(Parser *parser) {
         size_t token_len = strlen(prop_token.value);
 
         if (offset + token_len < MAX_TOKEN_VALUE_LENGTH - 1) {
-          strcpy(placement.block_properties + offset, prop_token.value);
-          offset += token_len;
+          safe_strncpy(placement.block_properties + offset, prop_token.value, MAX_TOKEN_VALUE_LENGTH - offset);
+          offset += strlen(placement.block_properties + offset);
         }
       }
       if (!expect_token(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after block properties")) {
@@ -699,8 +711,7 @@ static ForLoop parse_for_loop(Parser *parser) {
     return loop;
   }
 
-  strncpy(loop.variable, var_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  loop.variable[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(loop.variable, var_token.value, MAX_TOKEN_VALUE_LENGTH);
   next();
 
   if (!consume_keyword("in")) {
@@ -871,8 +882,7 @@ static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
     }
 
     NamedArgument arg = {0};
-    strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-    arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    safe_strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH);
     next();
 
     if (consume(TOKEN_EQUAL)) {
@@ -949,8 +959,7 @@ static Occurrence parse_occurrence(Parser *parser) {
     return occurrence;
   }
 
-  strncpy(occurrence.type, type_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(occurrence.type, type_token.value, MAX_TOKEN_VALUE_LENGTH);
   next();
 
   if (!parse_occurrence_header(parser, &occurrence)) {
@@ -967,8 +976,7 @@ static Occurrence parse_occurrence(Parser *parser) {
 static Occurrence parse_occurrence_definition(Parser *parser, const char *name) {
   Occurrence occurrence = {0};
   occurrence.kind = OCCURRENCE_KIND_DEFINITION;
-  strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH);
   occurrence.condition = NULL;
   named_argument_list_init(&occurrence.args);
   instruction_list_init(&occurrence.body);
@@ -984,8 +992,7 @@ static Occurrence parse_occurrence_definition(Parser *parser, const char *name) 
     return occurrence;
   }
 
-  strncpy(occurrence.type, type_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  occurrence.type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(occurrence.type, type_token.value, MAX_TOKEN_VALUE_LENGTH);
   next();
 
   if (!parse_occurrence_header(parser, &occurrence)) {
@@ -998,8 +1005,7 @@ static Occurrence parse_occurrence_definition(Parser *parser, const char *name) 
 static Occurrence parse_occurrence_reference(Parser *parser, const char *name) {
   Occurrence occurrence = {0};
   occurrence.kind = OCCURRENCE_KIND_REFERENCE;
-  strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH);
   occurrence.type[0] = '\0';
   occurrence.condition = NULL;
   named_argument_list_init(&occurrence.args);
@@ -1048,8 +1054,7 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
       break;
     }
 
-    strncpy(entry.block_name, block_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-    entry.block_name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    safe_strncpy(entry.block_name, block_token.value, MAX_TOKEN_VALUE_LENGTH);
     next();
 
     // Parse optional properties
@@ -1061,8 +1066,8 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
         size_t token_len = strlen(prop_token.value);
 
         if (offset + token_len < MAX_TOKEN_VALUE_LENGTH - 1) {
-          strcpy(entry.block_properties + offset, prop_token.value);
-          offset += token_len;
+          safe_strncpy(entry.block_properties + offset, prop_token.value, MAX_TOKEN_VALUE_LENGTH - offset);
+          offset += strlen(entry.block_properties + offset);
         }
       }
       if (!consume(TOKEN_RIGHT_BRACKET)) {
@@ -1114,8 +1119,7 @@ static MacroCall parse_macro_call(Parser *parser) {
     return macro;
   }
 
-  strncpy(macro.name, name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-  macro.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(macro.name, name_token.value, MAX_TOKEN_VALUE_LENGTH);
   next();
 
   // Parse arguments (.name or .name=value)
@@ -1127,8 +1131,7 @@ static MacroCall parse_macro_call(Parser *parser) {
     }
 
     NamedArgument arg = {0};
-    strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-    arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    safe_strncpy(arg.name, arg_name_token.value, MAX_TOKEN_VALUE_LENGTH);
     next();
 
     if (consume(TOKEN_EQUAL)) {
@@ -1221,15 +1224,13 @@ static Instruction *parse_instruction(Parser *parser) {
   if (peek_type() == TOKEN_IDENTIFIER) {
     Token name_token = next();
     char name[MAX_TOKEN_VALUE_LENGTH];
-    strncpy(name, name_token.value, MAX_TOKEN_VALUE_LENGTH - 1);
-    name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    safe_strncpy(name, name_token.value, MAX_TOKEN_VALUE_LENGTH);
 
     if (consume(TOKEN_EQUAL)) {
       // Check if this is a palette definition or occurrence assignment
       if (peek_type() == TOKEN_LEFT_BRACE) {
         instr->type = INSTR_ASSIGNMENT;
-        strncpy(instr->assignment.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-        instr->assignment.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+        safe_strncpy(instr->assignment.name, name, MAX_TOKEN_VALUE_LENGTH);
         instr->assignment.is_palette_definition = true;
         PaletteDefinition tmp = parse_palette_definition(parser);
         PaletteDefinition *heap_def = malloc(sizeof(PaletteDefinition));
@@ -1239,8 +1240,7 @@ static Instruction *parse_instruction(Parser *parser) {
           return NULL;
         }
         *heap_def = tmp;
-        strncpy(heap_def->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-        heap_def->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+        safe_strncpy(heap_def->name, name, MAX_TOKEN_VALUE_LENGTH);
         instr->assignment.palette_definition = heap_def;
         if (parser->has_error) {
           free(instr);
@@ -1257,8 +1257,7 @@ static Instruction *parse_instruction(Parser *parser) {
         return instr;
       } else {
         instr->type = INSTR_ASSIGNMENT;
-        strncpy(instr->assignment.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-        instr->assignment.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+        safe_strncpy(instr->assignment.name, name, MAX_TOKEN_VALUE_LENGTH);
         instr->assignment.value = parse_expression(parser);
         if (parser->has_error) {
           free(instr);
@@ -1323,7 +1322,7 @@ static Expression *expression_copy(const Expression *expr) {
 
   switch (expr->type) {
   case EXPR_NUMBER: copy->number = expr->number; break;
-  case EXPR_IDENTIFIER: strncpy(copy->identifier, expr->identifier, MAX_TOKEN_VALUE_LENGTH); break;
+  case EXPR_IDENTIFIER: safe_strncpy(copy->identifier, expr->identifier, MAX_TOKEN_VALUE_LENGTH); break;
   case EXPR_BINARY_OP:
     copy->binary.op = expr->binary.op;
     copy->binary.left = expression_copy(expr->binary.left);
@@ -1351,7 +1350,7 @@ static Expression *expression_copy(const Expression *expr) {
     }
     break;
   case EXPR_FUNCTION_CALL:
-    strncpy(copy->function_call.name, expr->function_call.name, MAX_TOKEN_VALUE_LENGTH);
+    safe_strncpy(copy->function_call.name, expr->function_call.name, MAX_TOKEN_VALUE_LENGTH);
     expression_list_init(&copy->function_call.args);
     for (size_t i = 0; i < expr->function_call.args.count; i++) {
       Expression *arg_copy = expression_copy(expr->function_call.args.items[i]);
@@ -1446,8 +1445,7 @@ void macro_registry_register(MacroRegistry *registry, const char *name, MacroGen
   }
 
   MacroRegistryEntry *entry = &registry->entries[registry->entry_count++];
-  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH);
   entry->generator = generator;
 }
 
@@ -1491,8 +1489,7 @@ static bool named_argument_list_clone(NamedArgumentList *dest, const NamedArgume
   for (size_t i = 0; i < src->count; i++) {
     NamedArgument *dest_arg = &dest->items[i];
     const NamedArgument *src_arg = &src->items[i];
-    strncpy(dest_arg->name, src_arg->name, MAX_TOKEN_VALUE_LENGTH - 1);
-    dest_arg->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    safe_strncpy(dest_arg->name, src_arg->name, MAX_TOKEN_VALUE_LENGTH);
     dest_arg->value = expression_copy(src_arg->value);
     if (!dest_arg->value) {
       for (size_t j = 0; j < i; j++) {
@@ -1541,10 +1538,8 @@ bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, con
   }
 
   *entry = (OccurrenceRegistryEntry){0};
-  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  strncpy(entry->type, type, MAX_TOKEN_VALUE_LENGTH - 1);
-  entry->type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH);
+  safe_strncpy(entry->type, type, MAX_TOKEN_VALUE_LENGTH);
 
   if (!named_argument_list_clone(&entry->args, args)) {
     return false;
@@ -1581,8 +1576,7 @@ void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const c
   }
 
   OccurrenceTypeRegistryEntry *entry = &registry->entries[registry->entry_count++];
-  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH);
   entry->generator = generator;
 }
 
@@ -1625,8 +1619,7 @@ bool function_registry_register(FunctionRegistry *registry, const char *name, si
   }
 
   FunctionRegistryEntry *entry = &registry->entries[registry->entry_count++];
-  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH);
   entry->min_args = min_args;
   entry->max_args = max_args;
   entry->function = function;
@@ -1689,8 +1682,7 @@ void context_set(VariableContext *ctx, const char *name, double value) {
   }
 
   Variable *variable = &ctx->variables[ctx->variable_count++];
-  strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  variable->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH);
   variable->type = VAR_NUMBER;
   variable->v.value = value;
 }
@@ -1720,8 +1712,7 @@ void context_set_palette(VariableContext *ctx, const char *name, const PaletteDe
   }
 
   Variable *variable = &ctx->variables[ctx->variable_count++];
-  strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-  variable->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+  safe_strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH);
   variable->type = VAR_PALETTE;
   variable->v.palette = copy;
 }
