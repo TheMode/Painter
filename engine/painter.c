@@ -862,7 +862,7 @@ static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
   named_argument_list_init(&occurrence->args);
   occurrence->condition = NULL;
 
-  // Parse arguments (.name=value)
+  // Parse arguments (.name or .name=value)
   while (consume(TOKEN_DOT)) {
     Token arg_name_token = peek();
     if (arg_name_token.type != TOKEN_IDENTIFIER) {
@@ -875,13 +875,17 @@ static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
     arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     next();
 
-    if (!expect_token(parser, TOKEN_EQUAL, "Expected '=' after argument name")) {
-      return false;
-    }
-
-    arg.value = parse_expression(parser);
-    if (!arg.value) {
-      return false;
+    if (consume(TOKEN_EQUAL)) {
+      arg.value = parse_expression(parser);
+      if (!arg.value) {
+        return false;
+      }
+    } else {
+      arg.value = make_number(1.0);
+      if (!arg.value) {
+        parser_error(parser, "Out of memory");
+        return false;
+      }
     }
 
     if (!named_argument_list_push(parser, &occurrence->args, arg)) {
@@ -1114,7 +1118,7 @@ static MacroCall parse_macro_call(Parser *parser) {
   macro.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   next();
 
-  // Parse arguments (.name=value)
+  // Parse arguments (.name or .name=value)
   while (consume(TOKEN_DOT)) {
     Token arg_name_token = peek();
     if (arg_name_token.type != TOKEN_IDENTIFIER) {
@@ -1127,13 +1131,17 @@ static MacroCall parse_macro_call(Parser *parser) {
     arg.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
     next();
 
-    if (!expect_token(parser, TOKEN_EQUAL, "Expected '=' after argument name")) {
-      return macro;
-    }
-
-    arg.value = parse_expression(parser);
-    if (!arg.value) {
-      return macro;
+    if (consume(TOKEN_EQUAL)) {
+      arg.value = parse_expression(parser);
+      if (!arg.value) {
+        return macro;
+      }
+    } else {
+      arg.value = make_number(1.0);
+      if (!arg.value) {
+        parser_error(parser, "Out of memory");
+        return macro;
+      }
     }
 
     if (!named_argument_list_push(parser, &macro.arguments, arg)) {

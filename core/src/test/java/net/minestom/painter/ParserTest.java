@@ -91,6 +91,7 @@ final class ParserTest {
                         """),
                 Arguments.of("#sphere .x=8 .radius=5 .block=stone"),
                 Arguments.of("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone"),
+                Arguments.of("#cuboid .width=4 .height=3 .depth=5 .block=oak_planks .hollow"),
                 Arguments.of("""
                         // Configuration
                         tower_height = 50
@@ -168,7 +169,7 @@ final class ParserTest {
                 Arguments.of("[0]"), // incomplete coordinate
                 Arguments.of("[0 0 0"), // missing closing bracket
                 Arguments.of("for i in 0.. { [0 0 0] stone }"), // malformed range
-                Arguments.of("#sphere .x=5 .radius"), // malformed macro args
+                Arguments.of("#sphere .x=5 .radius="), // malformed macro args
                 Arguments.of("repeat = @every .x=0 .y= { repeat { [0 0] oak_planks }"), // broken occurrence
                 Arguments.of("[min(  ,  ) 0 0] stone") // malformed function call
         );
@@ -217,6 +218,32 @@ final class ParserTest {
         assertTrue(pi >= 0, "Expected block not present in palette: " + expectedBlockId);
         assertEquals(pi, blockIndex(section, x, y, z),
                 "Block mismatch at (" + x + "," + y + "," + z + ")");
+    }
+
+    @PaintTest("""
+            #cuboid .width=3 .height=2 .depth=2 .block=stone
+            #cuboid .x=14 .width=4 .height=2 .depth=1 .block=gold_block
+            """)
+    @DisplayName("#cuboid macro fills volume and spans section boundaries")
+    void testCuboidMacroAcrossSections(ProgramContext ctx) {
+        PainterParser.SectionData section0 = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData section1 = ctx.generateSection(1, 0, 0);
+
+        assertPaletteContains(section0, "stone", "gold_block", "air");
+        assertPaletteContains(section1, "gold_block", "air");
+
+        // Solid cuboid rooted at origin covers expected volume
+        assertBlockAt(section0, 0, 0, 0, "stone");
+        assertBlockAt(section0, 2, 1, 1, "stone");
+        assertBlockAt(section0, 3, 0, 0, "air");
+
+        // Second cuboid crosses the positive X section boundary (x = 14..17)
+        assertBlockAt(section0, 14, 0, 0, "gold_block");
+        assertBlockAt(section0, 15, 1, 0, "gold_block");
+
+        assertBlockAt(section1, 0, 0, 0, "gold_block");
+        assertBlockAt(section1, 1, 1, 0, "gold_block");
+        assertBlockAt(section1, 2, 0, 0, "air");
     }
 
     @PaintTest("""
