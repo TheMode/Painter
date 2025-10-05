@@ -91,7 +91,8 @@ final class ParserTest {
                         """),
                 Arguments.of("#sphere .x=8 .radius=5 .block=stone"),
                 Arguments.of("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone"),
-                Arguments.of("#cuboid .width=4 .height=3 .depth=5 .block=oak_planks .hollow"),
+                Arguments.of("#cuboid .from=[0 0 0] .to=[3 2 4] .block=oak_planks .hollow"),
+                Arguments.of("#line .from=[0 0 0] .to=[5 0 0] .block=stone"),
                 Arguments.of("""
                         // Configuration
                         tower_height = 50
@@ -221,8 +222,8 @@ final class ParserTest {
     }
 
     @PaintTest("""
-            #cuboid .width=3 .height=2 .depth=2 .block=stone
-            #cuboid .x=14 .width=4 .height=2 .depth=1 .block=gold_block
+            #cuboid .from=[0 0 0] .to=[2 1 1] .block=stone
+            #cuboid .from=[14 0 0] .to=[17 1 0] .block=gold_block
             """)
     @DisplayName("#cuboid macro fills volume and spans section boundaries")
     void testCuboidMacroAcrossSections(ProgramContext ctx) {
@@ -244,6 +245,44 @@ final class ParserTest {
         assertBlockAt(section1, 0, 0, 0, "gold_block");
         assertBlockAt(section1, 1, 1, 0, "gold_block");
         assertBlockAt(section1, 2, 0, 0, "air");
+    }
+
+    @PaintTest("""
+            #line .from=[0 0 0] .to=[5 0 0] .block=stone
+            #line .from=[0 1 0] .to=[5 5 0] .block=gold_block
+            #line .from=[14 2 0] .to=[18 2 0] .block=iron_block
+            #line .from=[0 3 0] .to=[3 6 3] .block=copper_block
+            """)
+    @DisplayName("#line macro draws axis-aligned, diagonal, and cross-section segments")
+    void testLineMacro(ProgramContext ctx) {
+        PainterParser.SectionData section0 = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData section1 = ctx.generateSection(1, 0, 0);
+
+        assertPaletteContains(section0, "stone", "gold_block", "iron_block", "copper_block", "air");
+        assertPaletteContains(section1, "iron_block", "air");
+
+        // Axis-aligned X line
+        assertBlockAt(section0, 0, 0, 0, "stone");
+        assertBlockAt(section0, 3, 0, 0, "stone");
+        assertBlockAt(section0, 5, 0, 0, "stone");
+
+        // Rising diagonal within same section (dominant X axis)
+        assertBlockAt(section0, 0, 1, 0, "gold_block");
+        assertBlockAt(section0, 1, 2, 0, "gold_block");
+        assertBlockAt(section0, 3, 3, 0, "gold_block");
+        assertBlockAt(section0, 5, 5, 0, "gold_block");
+
+        // Cross-section horizontal line (X wraps into next section)
+        assertBlockAt(section0, 14, 2, 0, "iron_block");
+        assertBlockAt(section0, 15, 2, 0, "iron_block");
+        assertBlockAt(section1, 0, 2, 0, "iron_block");
+        assertBlockAt(section1, 2, 2, 0, "iron_block");
+
+        // 3D diagonal (increments along X, Y, Z)
+        assertBlockAt(section0, 0, 3, 0, "copper_block");
+        assertBlockAt(section0, 1, 4, 1, "copper_block");
+        assertBlockAt(section0, 2, 5, 2, "copper_block");
+        assertBlockAt(section0, 3, 6, 3, "copper_block");
     }
 
     @PaintTest("""

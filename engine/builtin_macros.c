@@ -2,6 +2,7 @@
 #include "painter_eval.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 static inline int world_to_local(int world_coord, int section_base) { return world_coord - section_base; }
 
@@ -53,6 +54,90 @@ static bool eval_boolean_flag(const Expression *expr, ExecutionState *state) {
     return false;
   }
   return painter_evaluate_expression(expr, state) != 0.0;
+}
+
+static bool eval_coordinate_argument(const Expression *expr, ExecutionState *state, int *out_x, int *out_y, int *out_z) {
+  if (!expr || !state || !out_x || !out_y || !out_z) {
+    return false;
+  }
+
+  if (expr->type != EXPR_COORDINATE || !expr->coordinate.x) {
+    return false;
+  }
+
+  const double x_val = painter_evaluate_expression(expr->coordinate.x, state);
+  const double y_val = expr->coordinate.y ? painter_evaluate_expression(expr->coordinate.y, state) : 0.0;
+  const double z_val = expr->coordinate.z ? painter_evaluate_expression(expr->coordinate.z, state) : 0.0;
+
+  *out_x = state->current_origin_x + (int)llround(x_val);
+  *out_y = state->current_origin_y + (int)llround(y_val);
+  *out_z = state->current_origin_z + (int)llround(z_val);
+  return true;
+}
+
+static void draw_line(ExecutionState *state, int x0, int y0, int z0, int x1, int y1, int z1, int palette_index) {
+  int dx = abs(x1 - x0);
+  int dy = abs(y1 - y0);
+  int dz = abs(z1 - z0);
+
+  const int step_x = (x1 > x0) ? 1 : (x1 < x0 ? -1 : 0);
+  const int step_y = (y1 > y0) ? 1 : (y1 < y0 ? -1 : 0);
+  const int step_z = (z1 > z0) ? 1 : (z1 < z0 ? -1 : 0);
+
+  write_block_if_visible(state, x0, y0, z0, palette_index);
+
+  if (dx >= dy && dx >= dz) {
+    int err_y = (dy << 1) - dx;
+    int err_z = (dz << 1) - dx;
+    while (x0 != x1) {
+      x0 += step_x;
+      if (err_y >= 0) {
+        y0 += step_y;
+        err_y -= (dx << 1);
+      }
+      if (err_z >= 0) {
+        z0 += step_z;
+        err_z -= (dx << 1);
+      }
+      err_y += (dy << 1);
+      err_z += (dz << 1);
+      write_block_if_visible(state, x0, y0, z0, palette_index);
+    }
+  } else if (dy >= dx && dy >= dz) {
+    int err_x = (dx << 1) - dy;
+    int err_z = (dz << 1) - dy;
+    while (y0 != y1) {
+      y0 += step_y;
+      if (err_x >= 0) {
+        x0 += step_x;
+        err_x -= (dy << 1);
+      }
+      if (err_z >= 0) {
+        z0 += step_z;
+        err_z -= (dy << 1);
+      }
+      err_x += (dx << 1);
+      err_z += (dz << 1);
+      write_block_if_visible(state, x0, y0, z0, palette_index);
+    }
+  } else {
+    int err_x = (dx << 1) - dz;
+    int err_y = (dy << 1) - dz;
+    while (z0 != z1) {
+      z0 += step_z;
+      if (err_x >= 0) {
+        x0 += step_x;
+        err_x -= (dz << 1);
+      }
+      if (err_y >= 0) {
+        y0 += step_y;
+        err_y -= (dz << 1);
+      }
+      err_x += (dx << 1);
+      err_y += (dy << 1);
+      write_block_if_visible(state, x0, y0, z0, palette_index);
+    }
+  }
 }
 
 // Sphere macro: #sphere .x=<x> .y=<y> .z=<z> .radius=<radius> .block=<block_name>
@@ -119,7 +204,7 @@ void builtin_macro_sphere(ExecutionState *state, const NamedArgumentList *args) 
   }
 }
 
-// Cuboid macro: #cuboid .x=<x> .y=<y> .z=<z> .width=<width> .height=<height> .depth=<depth> .block=<block_name> [.hollow]
+// Cuboid macro: #cuboid .from=[x y z] .to=[x y z] .block=<block_name> [.hollow]
 void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) {
   if (!state) return;
 
@@ -128,31 +213,65 @@ void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) 
     return;
   }
 
-  int width = 0;
-  int height = 0;
-  int depth = 0;
-
-  if (!eval_positive_extent(named_arg_get(args, "width"), state, &width) ||
-      !eval_positive_extent(named_arg_get(args, "height"), state, &height) ||
-      !eval_positive_extent(named_arg_get(args, "depth"), state, &depth)) {
-    return;
-  }
-
   const int palette_index = add_block_to_palette(state, block_expr);
   if (palette_index < 0) {
     return;
   }
 
-  const int origin_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
-  const int origin_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
-  const int origin_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+  const Expression *from_expr = named_arg_get(args, "from");
+  const Expression *to_expr = named_arg_get(args, "to");
 
-  const int min_x = origin_x;
-  const int min_y = origin_y;
-  const int min_z = origin_z;
-  const int max_x = origin_x + width - 1;
-  const int max_y = origin_y + height - 1;
-  const int max_z = origin_z + depth - 1;
+  int min_x = 0;
+  int min_y = 0;
+  int min_z = 0;
+  int max_x = 0;
+  int max_y = 0;
+  int max_z = 0;
+
+  bool have_from_to = false;
+  if (from_expr && to_expr) {
+    int from_x = 0;
+    int from_y = 0;
+    int from_z = 0;
+    int to_x = 0;
+    int to_y = 0;
+    int to_z = 0;
+    if (!eval_coordinate_argument(from_expr, state, &from_x, &from_y, &from_z) ||
+        !eval_coordinate_argument(to_expr, state, &to_x, &to_y, &to_z)) {
+      return;
+    }
+
+    min_x = from_x < to_x ? from_x : to_x;
+    max_x = from_x > to_x ? from_x : to_x;
+    min_y = from_y < to_y ? from_y : to_y;
+    max_y = from_y > to_y ? from_y : to_y;
+    min_z = from_z < to_z ? from_z : to_z;
+    max_z = from_z > to_z ? from_z : to_z;
+    have_from_to = true;
+  }
+
+  if (!have_from_to) {
+    int width = 0;
+    int height = 0;
+    int depth = 0;
+
+    if (!eval_positive_extent(named_arg_get(args, "width"), state, &width) ||
+        !eval_positive_extent(named_arg_get(args, "height"), state, &height) ||
+        !eval_positive_extent(named_arg_get(args, "depth"), state, &depth)) {
+      return;
+    }
+
+    const int origin_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
+    const int origin_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
+    const int origin_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+
+    min_x = origin_x;
+    min_y = origin_y;
+    min_z = origin_z;
+    max_x = origin_x + width - 1;
+    max_y = origin_y + height - 1;
+    max_z = origin_z + depth - 1;
+  }
 
   PainterAABB bounds = {
       .min_x = min_x,
@@ -198,9 +317,61 @@ void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) 
   }
 }
 
+// Line macro: #line .from=[x y z] .to=[x y z] .block=<block_name>
+void builtin_macro_line(ExecutionState *state, const NamedArgumentList *args) {
+  if (!state) return;
+
+  Expression *block_expr = named_arg_get(args, "block");
+  const Expression *from_expr = named_arg_get(args, "from");
+  const Expression *to_expr = named_arg_get(args, "to");
+  if (!block_expr || !from_expr || !to_expr) {
+    return;
+  }
+
+  int start_x = 0;
+  int start_y = 0;
+  int start_z = 0;
+  if (!eval_coordinate_argument(from_expr, state, &start_x, &start_y, &start_z)) {
+    return;
+  }
+
+  int end_x = 0;
+  int end_y = 0;
+  int end_z = 0;
+  if (!eval_coordinate_argument(to_expr, state, &end_x, &end_y, &end_z)) {
+    return;
+  }
+
+  const int palette_index = add_block_to_palette(state, block_expr);
+  if (palette_index < 0) {
+    return;
+  }
+
+  if (start_x == end_x && start_y == end_y && start_z == end_z) {
+    write_block_if_visible(state, start_x, start_y, start_z, palette_index);
+    return;
+  }
+
+  PainterAABB bounds = {
+      .min_x = start_x < end_x ? start_x : end_x,
+      .max_x = start_x > end_x ? start_x : end_x,
+      .min_y = start_y < end_y ? start_y : end_y,
+      .max_y = start_y > end_y ? start_y : end_y,
+      .min_z = start_z < end_z ? start_z : end_z,
+      .max_z = start_z > end_z ? start_z : end_z,
+  };
+
+  if (!painter_section_clip_aabb(state, &bounds)) {
+    return;
+  }
+
+  draw_line(state, start_x, start_y, start_z, end_x, end_y, end_z, palette_index);
+}
+
 const BuiltinMacro BUILTIN_MACROS[] = {
     {"sphere", builtin_macro_sphere},
     {"cuboid", builtin_macro_cuboid},
+    {"line", builtin_macro_line},
 };
 
 const int BUILTIN_MACROS_COUNT = sizeof(BUILTIN_MACROS) / sizeof(BuiltinMacro);
