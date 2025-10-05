@@ -104,6 +104,14 @@ static double fn_avg(const double *args, size_t count) {
   return fn_sum(args, count) / (double)count;
 }
 
+static double fn_lerp(const double *args, size_t count) {
+  (void)count;
+  const double a = args[0];
+  const double b = args[1];
+  const double t = args[2];
+  return a + (b - a) * t;
+}
+
 static double fn_product(const double *args, size_t count) {
   double result = 1.0;
   for (size_t i = 0; i < count; i++) {
@@ -163,6 +171,7 @@ const BuiltinFunctionSpec BUILTIN_FUNCTIONS[] = {
     {"exp", 1, 1, fn_exp},
     {"sqrt", 1, 1, fn_sqrt},
     {"pow", 2, 2, fn_pow},
+    {"lerp", 3, 3, fn_lerp},
     {"between", 3, 3, fn_between},
     {"equal", 2, 3, fn_equal},
 };

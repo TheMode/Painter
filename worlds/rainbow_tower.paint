@@ -17,7 +17,7 @@ for y in 0..tower_height {
   z = radius * sin(angle)
   
   // Rainbow colors based on height
-  color_index = (y * 16) / tower_height
+  color_index = lerp(0, 16, y / tower_height)
   
   // Different blocks at different heights
   if(y < tower_height / 3) {
