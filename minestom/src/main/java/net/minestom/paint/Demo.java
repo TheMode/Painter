@@ -16,7 +16,6 @@ import net.minestom.server.instance.block.Block;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -86,9 +85,8 @@ public final class Demo {
         // Register commands for manual reload and URL loading
         if (ENABLE_LOAD_COMMANDS) {
             CommandManager commandManager = MinecraftServer.getCommandManager();
-            commandManager.register(new PainterCommand.ReloadCommand(instance, waitingInstance, paintFile));
-            commandManager.register(new PainterCommand.LoadPaintCommand(instance, waitingInstance));
-            LOGGER.info("Commands registered: /reload, /loadpaint <url>");
+            commandManager.register(new PainterCommand(instance, waitingInstance, paintFile));
+            LOGGER.info("Commands registered: /painter reload, /painter load <url>");
         }
 
         // Add an event callback to specify the spawning instance (and the spawn position)
@@ -109,8 +107,8 @@ public final class Demo {
             player.sendMessage(text(""));
             if (ENABLE_LOAD_COMMANDS) {
                 player.sendMessage(text("Commands:", YELLOW));
-                player.sendMessage(text("  /reload", GREEN).append(text(" - Reload from file", GRAY)));
-                player.sendMessage(text("  /loadpaint <url>", GREEN).append(text(" - Load from URL", GRAY)));
+                player.sendMessage(text("  /painter reload", GREEN).append(text(" - Reload from file", GRAY)));
+                player.sendMessage(text("  /painter load <url>", GREEN).append(text(" - Load from URL", GRAY)));
                 player.sendMessage(text(""));
                 player.sendMessage(text("Share your creations!", AQUA));
                 player.sendMessage(text("Upload your .paint file to pastebin.com or gist.github.com", GRAY));

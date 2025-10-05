@@ -17,11 +17,18 @@ import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.*;
 
 @NotNullByDefault
-public final class PainterCommand {
+public final class PainterCommand extends Command {
+    public PainterCommand(InstanceContainer instance, InstanceContainer waitingInstance, Path path) {
+        super("painter");
+        addSubcommands(
+                new Load(instance, waitingInstance),
+                new Reload(instance, waitingInstance, path)
+        );
+    }
 
     /**
      * Command to load a painter program from a URL.
-     * Usage: /loadpaint <url>
+     * Usage: /load <url>
      * <p>
      * This enables ShaderToy-style sharing where users can share links to their world generators
      * and others can try them instantly with a single command.
@@ -29,11 +36,11 @@ public final class PainterCommand {
      * This will regenerate ALL currently loaded chunks with the new generator.
      * Players will be temporarily moved to a waiting instance during regeneration.
      */
-    public static final class LoadPaintCommand extends Command {
-        private static final Logger LOGGER = LoggerFactory.getLogger(LoadPaintCommand.class);
+    private static final class Load extends Command {
+        private static final Logger LOGGER = LoggerFactory.getLogger(Load.class);
 
-        public LoadPaintCommand(InstanceContainer instance, InstanceContainer waitingInstance) {
-            super("loadpaint");
+        public Load(InstanceContainer instance, InstanceContainer waitingInstance) {
+            super("load");
 
             PaintUrlLoader urlLoader = new PaintUrlLoader();
 
@@ -90,10 +97,10 @@ public final class PainterCommand {
      * This will regenerate ALL currently loaded chunks with the new generator.
      * Players will be temporarily moved to a waiting instance during regeneration.
      */
-    public static final class ReloadCommand extends Command {
-        private static final Logger LOGGER = LoggerFactory.getLogger(ReloadCommand.class);
+    public static final class Reload extends Command {
+        private static final Logger LOGGER = LoggerFactory.getLogger(Reload.class);
 
-        public ReloadCommand(InstanceContainer instance, InstanceContainer waitingInstance, Path paintFile) {
+        public Reload(InstanceContainer instance, InstanceContainer waitingInstance, Path paintFile) {
             super("reload");
 
             setDefaultExecutor((sender, context) -> {
