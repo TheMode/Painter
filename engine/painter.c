@@ -1419,12 +1419,20 @@ void program_free(Program *program) {
 
 // Macro registry implementation
 void macro_registry_init(MacroRegistry *registry) {
-  registry->entries = NULL;
-  registry->entry_capacity = 0;
-  registry->entry_count = 0;
+  if (registry) *registry = (MacroRegistry){0};
 }
 
 void macro_registry_register(MacroRegistry *registry, const char *name, MacroGenerator generator) {
+  if (!registry || !name || !generator) return;
+
+  for (size_t i = 0; i < registry->entry_count; i++) {
+    MacroRegistryEntry *existing = &registry->entries[i];
+    if (strcmp(existing->name, name) == 0) {
+      existing->generator = generator;
+      return;
+    }
+  }
+
   if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity, registry->entry_count, sizeof(*registry->entries))) {
     return;
   }
@@ -1436,6 +1444,7 @@ void macro_registry_register(MacroRegistry *registry, const char *name, MacroGen
 }
 
 MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name) {
+  if (!registry || !name) return NULL;
   for (size_t i = 0; i < registry->entry_count; i++) {
     if (strcmp(registry->entries[i].name, name) == 0) {
       return registry->entries[i].generator;
@@ -1445,38 +1454,44 @@ MacroGenerator macro_registry_lookup(MacroRegistry *registry, const char *name) 
 }
 
 void macro_registry_free(MacroRegistry *registry) {
+  if (!registry) return;
   free(registry->entries);
-  registry->entries = NULL;
-  registry->entry_count = 0;
-  registry->entry_capacity = 0;
+  *registry = (MacroRegistry){0};
 }
 
 // Occurrence registry implementation
 void occurrence_registry_init(OccurrenceRegistry *registry) {
-  registry->entries = NULL;
-  registry->entry_count = 0;
-  registry->entry_capacity = 0;
+  if (registry) *registry = (OccurrenceRegistry){0};
 }
 
-static void occurrence_registry_entry_free(OccurrenceRegistryEntry *entry) {
-  if (!entry) return;
-  named_argument_list_destroy(&entry->args);
-}
-
-static bool named_argument_list_clone(Parser *parser, NamedArgumentList *dest, const NamedArgumentList *src) {
-  if (!dest || !src) return false;
+static bool named_argument_list_clone(NamedArgumentList *dest, const NamedArgumentList *src) {
+  if (!dest) return false;
 
   named_argument_list_destroy(dest);
-  named_argument_list_init(dest);
+  if (!src || src->count == 0) {
+    return true;
+  }
+
+  NamedArgument *items = calloc(src->count, sizeof(NamedArgument));
+  if (!items) {
+    return false;
+  }
+
+  dest->items = items;
+  dest->count = dest->capacity = src->count;
 
   for (size_t i = 0; i < src->count; i++) {
-    NamedArgument argument = (NamedArgument){0};
-    strncpy(argument.name, src->items[i].name, MAX_TOKEN_VALUE_LENGTH - 1);
-    argument.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-    argument.value = expression_copy(src->items[i].value);
-    if (!argument.value || !named_argument_list_push(parser, dest, argument)) {
-      expression_free(argument.value);
-      named_argument_list_destroy(dest);
+    NamedArgument *dest_arg = &dest->items[i];
+    const NamedArgument *src_arg = &src->items[i];
+    strncpy(dest_arg->name, src_arg->name, MAX_TOKEN_VALUE_LENGTH - 1);
+    dest_arg->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    dest_arg->value = expression_copy(src_arg->value);
+    if (!dest_arg->value) {
+      for (size_t j = 0; j < i; j++) {
+        expression_free(dest->items[j].value);
+      }
+      free(dest->items);
+      *dest = (NamedArgumentList){0};
       return false;
     }
   }
@@ -1487,12 +1502,10 @@ static bool named_argument_list_clone(Parser *parser, NamedArgumentList *dest, c
 void occurrence_registry_free(OccurrenceRegistry *registry) {
   if (!registry) return;
   for (size_t i = 0; i < registry->entry_count; i++) {
-    occurrence_registry_entry_free(&registry->entries[i]);
+    named_argument_list_destroy(&registry->entries[i].args);
   }
   free(registry->entries);
-  registry->entries = NULL;
-  registry->entry_count = 0;
-  registry->entry_capacity = 0;
+  *registry = (OccurrenceRegistry){0};
 }
 
 OccurrenceRegistryEntry *occurrence_registry_lookup(OccurrenceRegistry *registry, const char *name) {
@@ -1515,45 +1528,44 @@ bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, con
     }
 
     entry = &registry->entries[registry->entry_count++];
-    *entry = (OccurrenceRegistryEntry){0};
-    strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
-    entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   } else {
-    occurrence_registry_entry_free(entry);
+    named_argument_list_destroy(&entry->args);
   }
 
+  *entry = (OccurrenceRegistryEntry){0};
+  strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
+  entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   strncpy(entry->type, type, MAX_TOKEN_VALUE_LENGTH - 1);
   entry->type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
 
-  if (args && args->count > 0) {
-    if (!named_argument_list_clone(NULL, &entry->args, args)) {
-      return false;
-    }
-  } else {
-    named_argument_list_destroy(&entry->args);
+  if (!named_argument_list_clone(&entry->args, args)) {
+    return false;
   }
 
   return true;
 }
 
 void occurrence_type_registry_init(OccurrenceTypeRegistry *registry) {
-  if (!registry) return;
-  registry->entries = NULL;
-  registry->entry_count = 0;
-  registry->entry_capacity = 0;
+  if (registry) *registry = (OccurrenceTypeRegistry){0};
 }
 
 void occurrence_type_registry_free(OccurrenceTypeRegistry *registry) {
   if (!registry) return;
   free(registry->entries);
-  registry->entries = NULL;
-  registry->entry_count = 0;
-  registry->entry_capacity = 0;
+  *registry = (OccurrenceTypeRegistry){0};
 }
 
 void occurrence_type_registry_register(OccurrenceTypeRegistry *registry, const char *name, OccurrenceGenerator generator) {
   if (!registry || !name || !generator) {
     return;
+  }
+
+  for (size_t i = 0; i < registry->entry_count; i++) {
+    OccurrenceTypeRegistryEntry *existing = &registry->entries[i];
+    if (strcmp(existing->name, name) == 0) {
+      existing->generator = generator;
+      return;
+    }
   }
 
   if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity, registry->entry_count, sizeof(*registry->entries))) {
@@ -1582,14 +1594,22 @@ OccurrenceGenerator occurrence_type_registry_lookup(OccurrenceTypeRegistry *regi
 
 // Function registry implementation
 void function_registry_init(FunctionRegistry *registry) {
-  registry->entries = NULL;
-  registry->entry_count = 0;
-  registry->entry_capacity = 0;
+  if (registry) *registry = (FunctionRegistry){0};
 }
 
 bool function_registry_register(FunctionRegistry *registry, const char *name, size_t min_args, size_t max_args, BuiltinFunction function) {
   if (!registry || !name || !function) {
     return false;
+  }
+
+  for (size_t i = 0; i < registry->entry_count; i++) {
+    FunctionRegistryEntry *existing = &registry->entries[i];
+    if (strcmp(existing->name, name) == 0) {
+      existing->min_args = min_args;
+      existing->max_args = max_args;
+      existing->function = function;
+      return true;
+    }
   }
 
   if (!ensure_capacity(NULL, (void **)&registry->entries, &registry->entry_capacity, registry->entry_count, sizeof(*registry->entries))) {
@@ -1621,9 +1641,7 @@ const FunctionRegistryEntry *function_registry_lookup(const FunctionRegistry *re
 void function_registry_free(FunctionRegistry *registry) {
   if (!registry) return;
   free(registry->entries);
-  registry->entries = NULL;
-  registry->entry_capacity = 0;
-  registry->entry_count = 0;
+  *registry = (FunctionRegistry){0};
 }
 
 // Variable context implementation (moving from static to exported)

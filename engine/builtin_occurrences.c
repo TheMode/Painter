@@ -7,82 +7,83 @@
 #include <stdint.h>
 
 static int floor_div_int(int numerator, int denominator) {
-  int64_t dividend = numerator;
-  int64_t divisor = denominator;
+  const int64_t dividend = numerator;
+  const int64_t divisor = denominator;
 
   int64_t quotient = dividend / divisor;
-  int64_t remainder = dividend % divisor;
-  if (remainder != 0 && ((remainder < 0) != (divisor < 0))) {
-    quotient -= 1;
+  const int64_t remainder = dividend % divisor;
+  if (remainder && ((remainder < 0) != (divisor < 0))) {
+    --quotient;
   }
   return (int)quotient;
 }
 
 static int ceil_div_int(int numerator, int denominator) {
-  int64_t dividend = numerator;
-  int64_t divisor = denominator;
+  const int64_t dividend = numerator;
+  const int64_t divisor = denominator;
 
   int64_t quotient = dividend / divisor;
-  int64_t remainder = dividend % divisor;
-  if (remainder != 0 && ((remainder < 0) == (divisor < 0))) {
-    quotient += 1;
+  const int64_t remainder = dividend % divisor;
+  if (remainder && ((remainder < 0) == (divisor < 0))) {
+    ++quotient;
   }
   return (int)quotient;
 }
 
-static void compute_iteration_bounds(int origin, int step, int range_min, int range_max, int *start, int *end) {
+static bool compute_iteration_bounds(int step, int range_min, int range_max, int *start, int *end) {
   if (!start || !end) {
-    return;
+    return false;
   }
 
   if (step == 0) {
-    *start = 0;
-    *end = 0;
-    return;
+    *start = *end = 0;
+    return true;
   }
 
+  int lower;
+  int upper;
   if (step > 0) {
-    const int lower = ceil_div_int(range_min - origin, step);
-    const int upper = floor_div_int(range_max - origin, step);
-    if (lower > upper) {
-      *start = 0;
-      *end = -1;
-    } else {
-      *start = lower;
-      *end = upper;
-    }
-    return;
+    lower = ceil_div_int(range_min, step);
+    upper = floor_div_int(range_max, step);
+  } else {
+    lower = ceil_div_int(range_max, step);
+    upper = floor_div_int(range_min, step);
   }
 
-  const int lower = ceil_div_int(range_max - origin, step);
-  const int upper = floor_div_int(range_min - origin, step);
   if (lower > upper) {
-    *start = 0;
-    *end = -1;
-  } else {
-    *start = lower;
-    *end = upper;
+    return false;
   }
+
+  *start = lower;
+  *end = upper;
+  return true;
 }
 
-static void occurrence_every(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
-    OccurrenceRuntime *runtime) {
+static double eval_double_or(const Expression *expr, ExecutionState *state, double fallback) {
+  return expr ? painter_evaluate_expression(expr, state) : fallback;
+}
+
+static int eval_int_or(const Expression *expr, ExecutionState *state, int fallback) {
+  return (int)llround(eval_double_or(expr, state, (double)fallback));
+}
+
+static void occurrence_every(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y,
+    int origin_z, OccurrenceRuntime *runtime) {
   if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
     return;
   }
 
-  // Get named arguments: .x, .y, .z for step sizes
-  Expression *step_x_expr = named_arg_get(args, "x");
-  Expression *step_y_expr = named_arg_get(args, "y");
-  Expression *step_z_expr = named_arg_get(args, "z");
+  const Expression *step_x_expr = named_arg_get(args, "x");
+  const Expression *step_y_expr = named_arg_get(args, "y");
+  const Expression *step_z_expr = named_arg_get(args, "z");
 
   if (!step_x_expr || !step_y_expr || !step_z_expr) {
-    return; // Missing required arguments
+    return;
   }
 
-  int step_x = (int)llround(painter_evaluate_expression(step_x_expr, state));
-  int step_y = (int)llround(painter_evaluate_expression(step_y_expr, state));
-  int step_z = (int)llround(painter_evaluate_expression(step_z_expr, state));
+  const int step_x = eval_int_or(step_x_expr, state, 0);
+  const int step_y = eval_int_or(step_y_expr, state, 0);
+  const int step_z = eval_int_or(step_z_expr, state, 0);
 
   const int SEARCH_MARGIN = 16;
   const int base_x = runtime->base_x;
@@ -103,35 +104,22 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
    * current section are executed. Using a fixed pattern origin prevents the
    * repetition grid from shifting per-section (which previously caused a
    * copy of the tower in every section). */
-  const int pattern_origin_x = 0;
-  const int pattern_origin_y = 0;
-  const int pattern_origin_z = 0;
-
   int kx_start, kx_end, ky_start, ky_end, kz_start, kz_end;
-  compute_iteration_bounds(pattern_origin_x, step_x, range_min_x, range_max_x, &kx_start, &kx_end);
-  compute_iteration_bounds(pattern_origin_y, step_y, range_min_y, range_max_y, &ky_start, &ky_end);
-  compute_iteration_bounds(pattern_origin_z, step_z, range_min_z, range_max_z, &kz_start, &kz_end);
-
-  if (kx_start > kx_end || ky_start > ky_end || kz_start > kz_end) {
+  if (!compute_iteration_bounds(step_x, range_min_x, range_max_x, &kx_start, &kx_end) ||
+      !compute_iteration_bounds(step_y, range_min_y, range_max_y, &ky_start, &ky_end) ||
+      !compute_iteration_bounds(step_z, range_min_z, range_max_z, &kz_start, &kz_end)) {
     return;
   }
 
   void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
   void *userdata = runtime->userdata;
 
-  /* Compute anchors in world-space using runtime base coordinates. These
-   * anchors are passed directly to run_body which expects world-space
-   * origin coordinates for executing the instruction body. */
   for (int kx = kx_start; kx <= kx_end; ++kx) {
-    int anchor_world_x = pattern_origin_x + step_x * kx;
+    const int anchor_world_x = step_x * kx;
     for (int ky = ky_start; ky <= ky_end; ++ky) {
-      int anchor_world_y = pattern_origin_y + step_y * ky;
+      const int anchor_world_y = step_y * ky;
       for (int kz = kz_start; kz <= kz_end; ++kz) {
-        int anchor_world_z = pattern_origin_z + step_z * kz;
-
-        /* Call run_body with absolute world coordinates for the anchor. The
-         * runtime and process_instruction expect origin parameters to be
-         * world-space coordinates so the placements compute correctly. */
+        const int anchor_world_z = step_z * kz;
         run_body(userdata, body, anchor_world_x, anchor_world_y, anchor_world_z);
       }
     }
@@ -150,28 +138,28 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
 // @noise .frequency=0.05 .seed=12345 .threshold=0.7 { ... }              // Sparse placement (30% of area)
 // @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 { ... }    // Terrain generation at y=64±16
 // @noise .frequency=0.1 .seed=12345 .threshold=0.8 .amplitude=16 .base_y=64 { ... }  // Trees on terrain (20% coverage)
-static void occurrence_noise(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
-    OccurrenceRuntime *runtime) {
+static void occurrence_noise(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y,
+    int origin_z, OccurrenceRuntime *runtime) {
   if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
     return;
   }
 
   // Get named arguments
-  Expression *frequency_expr = named_arg_get(args, "frequency");
+  const Expression *frequency_expr = named_arg_get(args, "frequency");
   Expression *seed_expr = named_arg_get(args, "seed");
   Expression *threshold_expr = named_arg_get(args, "threshold");
   Expression *amplitude_expr = named_arg_get(args, "amplitude");
-  Expression *base_y_expr = named_arg_get(args, "base_y");
+  const Expression *base_y_expr = named_arg_get(args, "base_y");
 
   if (!frequency_expr || !seed_expr) {
     return; // Missing required arguments
   }
 
-  float frequency = (float)painter_evaluate_expression(frequency_expr, state);
-  int seed = (int)llround(painter_evaluate_expression(seed_expr, state));
-  float threshold = threshold_expr ? (float)painter_evaluate_expression(threshold_expr, state) : -1.0f;
-  float amplitude = amplitude_expr ? (float)painter_evaluate_expression(amplitude_expr, state) : 0.0f;
-  int base_y = base_y_expr ? (int)llround(painter_evaluate_expression(base_y_expr, state)) : 0;
+  const float frequency = (float)eval_double_or(frequency_expr, state, 0.0);
+  const int seed = eval_int_or(seed_expr, state, 0);
+  const float threshold = (float)eval_double_or(threshold_expr, state, -1.0);
+  const float amplitude = (float)eval_double_or(amplitude_expr, state, 0.0);
+  const int base_y = eval_int_or(base_y_expr, state, 0);
 
   // Initialize noise
   fnl_state noise = fnlCreateState();
@@ -191,12 +179,12 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
   // Sample noise for each XZ coordinate
   const bool apply_threshold = threshold >= 0.0f;
   const bool apply_amplitude = amplitude != 0.0f;
-  const float threshold_value = threshold;
   void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
   void *userdata = runtime->userdata;
 
   const int origin_offset_y = origin_y;
   const int amplitude_base_y = base_y + origin_y;
+  const int base_anchor_y = apply_amplitude ? amplitude_base_y : origin_offset_y;
 
   for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
     for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
@@ -204,41 +192,36 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
 
       if (apply_threshold) {
         const float normalized_noise = (noise_value + 1.0f) * 0.5f;
-        if (normalized_noise < threshold_value) {
+        if (normalized_noise < threshold) {
           continue;
         }
       }
 
-      int anchor_y = origin_offset_y;
-      if (apply_amplitude) {
-        const int height_offset = (int)lroundf(noise_value * amplitude);
-        anchor_y = amplitude_base_y + height_offset;
-      }
-
-      run_body(userdata, body, anchor_x, anchor_y, anchor_z);
+      const int height_offset = apply_amplitude ? (int)lroundf(noise_value * amplitude) : 0;
+      run_body(userdata, body, anchor_x, base_anchor_y + height_offset, anchor_z);
     }
   }
 }
 
 // @noise3d .frequency=<val> .seed=<val> [.threshold=<val>]
 // Samples 3D noise and executes the body at positions that satisfy the threshold
-static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
-    OccurrenceRuntime *runtime) {
+static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x,
+    int origin_y, int origin_z, OccurrenceRuntime *runtime) {
   if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
     return;
   }
 
   Expression *frequency_expr = named_arg_get(args, "frequency");
-  Expression *seed_expr = named_arg_get(args, "seed");
-  Expression *threshold_expr = named_arg_get(args, "threshold");
+  const Expression *seed_expr = named_arg_get(args, "seed");
+  const Expression *threshold_expr = named_arg_get(args, "threshold");
 
   if (!frequency_expr || !seed_expr) {
     return;
   }
 
-  const float frequency = (float)painter_evaluate_expression(frequency_expr, state);
-  const int seed = (int)llround(painter_evaluate_expression(seed_expr, state));
-  const float threshold = threshold_expr ? (float)painter_evaluate_expression(threshold_expr, state) : -1.0f;
+  const float frequency = (float)eval_double_or(frequency_expr, state, 0.0);
+  const int seed = eval_int_or(seed_expr, state, 0);
+  const float threshold = (float)eval_double_or(threshold_expr, state, -1.0);
 
   fnl_state noise = fnlCreateState();
   noise.seed = seed;
@@ -258,7 +241,6 @@ static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *a
   const int range_max_z = base_z + 15 + SEARCH_MARGIN;
 
   const bool apply_threshold = threshold >= 0.0f;
-  const float threshold_value = threshold;
 
   void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
   void *userdata = runtime->userdata;
@@ -270,7 +252,7 @@ static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *a
 
         if (apply_threshold) {
           const float normalized_noise = (noise_value + 1.0f) * 0.5f;
-          if (normalized_noise < threshold_value) {
+          if (normalized_noise < threshold) {
             continue;
           }
         }
@@ -285,20 +267,15 @@ static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *a
 // Triggers once per section at the specified offset within the section
 // Offsets default to 0 if not provided
 // Sections are 16x16x16 blocks
-static void occurrence_section(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y, int origin_z,
-    OccurrenceRuntime *runtime) {
+static void occurrence_section(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x,
+    int origin_y, int origin_z, OccurrenceRuntime *runtime) {
   if (!runtime || !runtime->run_body || !body || body->count == 0) {
     return;
   }
 
-  // Get optional named arguments: .x, .y, .z for offsets within the section
-  Expression *offset_x_expr = named_arg_get(args, "x");
-  Expression *offset_y_expr = named_arg_get(args, "y");
-  Expression *offset_z_expr = named_arg_get(args, "z");
-
-  int offset_x = offset_x_expr ? (int)llround(painter_evaluate_expression(offset_x_expr, state)) : 0;
-  int offset_y = offset_y_expr ? (int)llround(painter_evaluate_expression(offset_y_expr, state)) : 0;
-  int offset_z = offset_z_expr ? (int)llround(painter_evaluate_expression(offset_z_expr, state)) : 0;
+  const int offset_x = eval_int_or(named_arg_get(args, "x"), state, 0);
+  const int offset_y = eval_int_or(named_arg_get(args, "y"), state, 0);
+  const int offset_z = eval_int_or(named_arg_get(args, "z"), state, 0);
 
   // Validate offsets are within section bounds (0-15)
   if (offset_x < 0 || offset_x > 15 || offset_y < 0 || offset_y > 15 || offset_z < 0 || offset_z > 15) {

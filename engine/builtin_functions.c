@@ -3,6 +3,18 @@
 #include <math.h>
 #include <stddef.h>
 
+#define FN_UNARY(name, func)                                                                                                               \
+  static double fn_##name(const double *args, size_t count) {                                                                              \
+    (void)count;                                                                                                                           \
+    return func(args[0]);                                                                                                                  \
+  }
+
+#define FN_BINARY(name, func)                                                                                                              \
+  static double fn_##name(const double *args, size_t count) {                                                                              \
+    (void)count;                                                                                                                           \
+    return func(args[0], args[1]);                                                                                                         \
+  }
+
 static double fn_min(const double *args, size_t count) {
   if (count == 0) {
     return 0.0;
@@ -25,30 +37,11 @@ static double fn_max(const double *args, size_t count) {
   return result;
 }
 
-static double fn_floor(const double *args, size_t count) {
-  (void)count;
-  return floor(args[0]);
-}
-
-static double fn_ceil(const double *args, size_t count) {
-  (void)count;
-  return ceil(args[0]);
-}
-
-static double fn_round(const double *args, size_t count) {
-  (void)count;
-  return round(args[0]);
-}
-
-static double fn_trunc(const double *args, size_t count) {
-  (void)count;
-  return trunc(args[0]);
-}
-
-static double fn_abs(const double *args, size_t count) {
-  (void)count;
-  return fabs(args[0]);
-}
+FN_UNARY(floor, floor)
+FN_UNARY(ceil, ceil)
+FN_UNARY(round, round)
+FN_UNARY(trunc, trunc)
+FN_UNARY(abs, fabs)
 
 static double fn_clamp(const double *args, size_t count) {
   (void)count;
@@ -67,9 +60,7 @@ static double fn_clamp(const double *args, size_t count) {
 
 static double fn_step(const double *args, size_t count) {
   (void)count;
-  double edge = args[0];
-  double x = args[1];
-  return x < edge ? 0.0 : 1.0;
+  return args[1] < args[0] ? 0.0 : 1.0;
 }
 
 static double fn_mod(const double *args, size_t count) {
@@ -88,50 +79,15 @@ static double fn_mod(const double *args, size_t count) {
   return result;
 }
 
-static double fn_sin(const double *args, size_t count) {
-  (void)count;
-  return sin(args[0]);
-}
-
-static double fn_cos(const double *args, size_t count) {
-  (void)count;
-  return cos(args[0]);
-}
-
-static double fn_tan(const double *args, size_t count) {
-  (void)count;
-  return tan(args[0]);
-}
-
-static double fn_asin(const double *args, size_t count) {
-  (void)count;
-  return asin(args[0]);
-}
-
-static double fn_acos(const double *args, size_t count) {
-  (void)count;
-  return acos(args[0]);
-}
-
-static double fn_atan(const double *args, size_t count) {
-  (void)count;
-  return atan(args[0]);
-}
-
-static double fn_atan2(const double *args, size_t count) {
-  (void)count;
-  return atan2(args[0], args[1]);
-}
-
-static double fn_sqrt(const double *args, size_t count) {
-  (void)count;
-  return sqrt(args[0]);
-}
-
-static double fn_pow(const double *args, size_t count) {
-  (void)count;
-  return pow(args[0], args[1]);
-}
+FN_UNARY(sin, sin)
+FN_UNARY(cos, cos)
+FN_UNARY(tan, tan)
+FN_UNARY(asin, asin)
+FN_UNARY(acos, acos)
+FN_UNARY(atan, atan)
+FN_BINARY(atan2, atan2)
+FN_UNARY(sqrt, sqrt)
+FN_BINARY(pow, pow)
 
 static double fn_sum(const double *args, size_t count) {
   double total = 0.0;
@@ -156,20 +112,9 @@ static double fn_product(const double *args, size_t count) {
   return result;
 }
 
-static double fn_log(const double *args, size_t count) {
-  (void)count;
-  return log(args[0]);
-}
-
-static double fn_log10(const double *args, size_t count) {
-  (void)count;
-  return log10(args[0]);
-}
-
-static double fn_exp(const double *args, size_t count) {
-  (void)count;
-  return exp(args[0]);
-}
+FN_UNARY(log, log)
+FN_UNARY(log10, log10)
+FN_UNARY(exp, exp)
 
 static double fn_between(const double *args, size_t count) {
   (void)count;
