@@ -18,11 +18,11 @@ import static net.kyori.adventure.text.format.NamedTextColor.*;
 
 @NotNullByDefault
 public final class PainterCommand extends Command {
-    public PainterCommand(InstanceContainer instance, InstanceContainer waitingInstance, Path path) {
+    public PainterCommand(InstanceContainer instance, Path path) {
         super("painter");
         addSubcommands(
-                new Load(instance, waitingInstance),
-                new Reload(instance, waitingInstance, path)
+                new Load(instance),
+                new Reload(instance, path)
         );
     }
 
@@ -39,7 +39,7 @@ public final class PainterCommand extends Command {
     private static final class Load extends Command {
         private static final Logger LOGGER = LoggerFactory.getLogger(Load.class);
 
-        public Load(InstanceContainer instance, InstanceContainer waitingInstance) {
+        public Load(InstanceContainer instance) {
             super("load");
 
             PaintUrlLoader urlLoader = new PaintUrlLoader();
@@ -63,7 +63,7 @@ public final class PainterCommand extends Command {
                         }
 
                         // Reload the generator and regenerate all chunks
-                        GeneratorReloader.reload(instance, waitingInstance, content, "URL: " + url);
+                        GeneratorReloader.reload(instance, content, "URL: " + url);
 
                         sender.sendMessage(text("✓ World generator loaded successfully!", GREEN));
                         sender.sendMessage(text("Source: " + url, GRAY));
@@ -100,7 +100,7 @@ public final class PainterCommand extends Command {
     public static final class Reload extends Command {
         private static final Logger LOGGER = LoggerFactory.getLogger(Reload.class);
 
-        public Reload(InstanceContainer instance, InstanceContainer waitingInstance, Path paintFile) {
+        public Reload(InstanceContainer instance, Path paintFile) {
             super("reload");
 
             setDefaultExecutor((sender, context) -> {
@@ -116,7 +116,7 @@ public final class PainterCommand extends Command {
                         sender.sendMessage(text("Moving " + playerCount + " players to waiting area...", GRAY));
                     }
 
-                    GeneratorReloader.reload(instance, waitingInstance, content, paintFile.toString());
+                    GeneratorReloader.reload(instance, content, paintFile.toString());
 
                     sender.sendMessage(text("✓ World generator reloaded successfully!", GREEN));
                     sender.sendMessage(text("✓ All " + chunkCount + " chunks regenerated!", GREEN));

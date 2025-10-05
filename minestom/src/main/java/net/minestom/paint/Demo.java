@@ -40,14 +40,6 @@ public final class Demo {
         InstanceContainer instance = instanceManager.createInstanceContainer();
         instance.setChunkSupplier(LightingChunk::new);
 
-        // Create a waiting instance for safe player teleportation during reloads
-        InstanceContainer waitingInstance = instanceManager.createInstanceContainer();
-        waitingInstance.setChunkSupplier(LightingChunk::new);
-        // Preload a simple waiting area
-        waitingInstance.setGenerator(unit -> unit.modifier().fillHeight(0, 63, Block.BEDROCK));
-        waitingInstance.loadChunk(0, 0).join();
-        LOGGER.info("Created waiting instance for reload safety");
-
         // Load the initial painter program
         Path paintFile = Path.of("worlds", "tour.paint");
         final String program = Files.readString(paintFile);
@@ -65,7 +57,7 @@ public final class Demo {
             try {
                 fileWatcher = new PaintFileWatcher(paintFile, (content, source) -> {
                     try {
-                        GeneratorReloader.reload(instance, waitingInstance, content, source);
+                        GeneratorReloader.reload(instance, content, source);
                         LOGGER.info("Auto-reloaded generator from file change");
 
                         // Notify all players
@@ -85,7 +77,7 @@ public final class Demo {
         // Register commands for manual reload and URL loading
         if (ENABLE_LOAD_COMMANDS) {
             CommandManager commandManager = MinecraftServer.getCommandManager();
-            commandManager.register(new PainterCommand(instance, waitingInstance, paintFile));
+            commandManager.register(new PainterCommand(instance, paintFile));
             LOGGER.info("Commands registered: /painter reload, /painter load <url>");
         }
 

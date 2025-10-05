@@ -1,19 +1,13 @@
 package net.minestom.paint;
 
-import net.minestom.server.coordinate.Pos;
-import net.minestom.server.entity.Player;
+import net.minestom.server.instance.Chunk;
 import net.minestom.server.instance.InstanceContainer;
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-
-import static net.minestom.server.coordinate.CoordConversion.*;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Helper class to reload the world generator and regenerate all loaded chunks.
@@ -31,14 +25,12 @@ public final class GeneratorReloader {
      * Reload the generator with new code and regenerate all currently loaded chunks.
      * Players in the instance will be temporarily moved to a waiting instance during the reload.
      *
-     * @param instance        The instance to reload
-     * @param waitingInstance The instance to move players to during reload (can be null if no players)
-     * @param programCode     The new painter program code
-     * @param source          Description of where the code came from
+     * @param instance    The instance to reload
+     * @param programCode The new painter program code
+     * @param source      Description of where the code came from
      * @throws RuntimeException if the new program fails to compile
      */
-    public static void reload(InstanceContainer instance, @Nullable InstanceContainer waitingInstance, 
-                            String programCode, String source) {
+    public static void reload(InstanceContainer instance, String programCode, String source) {
         LOGGER.info("Reloading generator from: {}", source);
 
         // Compile the new generator
@@ -50,47 +42,19 @@ public final class GeneratorReloader {
             throw new RuntimeException("Failed to compile painter program: " + e.getMessage(), e);
         }
 
-        // Save player positions and move them to waiting instance
-        Map<Player, Pos> playerPositions = new HashMap<>();
-        if (waitingInstance != null) {
-            for (Player player : instance.getPlayers()) {
-                playerPositions.put(player, player.getPosition());
-                player.setInstance(waitingInstance, new Pos(0, 65, 0)).join();
-            }
-            LOGGER.info("Moved {} players to waiting instance", playerPositions.size());
-        }
-
         // Get all currently loaded chunks before changing the generator
-        Set<Long> loadedChunks = ConcurrentHashMap.newKeySet();
-        instance.getChunks().forEach(chunk -> loadedChunks.add(chunkIndex(chunk.getChunkX(), chunk.getChunkZ())));
+        List<CompletableFuture<Void>> futures = instance.getChunks().stream()
+                .map(chunk -> instance.generateChunk(chunk.getChunkX(), chunk.getChunkZ(), newGenerator))
+                .toList();
 
-        LOGGER.info("Found {} loaded chunks to regenerate", loadedChunks.size());
+        LOGGER.info("Found {} loaded chunks to regenerate", futures.size());
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        LOGGER.info("All loaded chunks regenerated");
+
+        instance.getChunks().forEach(Chunk::sendChunk);
 
         // Set the new generator
         instance.setGenerator(newGenerator);
-
-        // Regenerate all loaded chunks
-        for (long chunkKey : loadedChunks) {
-            final int chunkX = chunkIndexGetX(chunkKey);
-            final int chunkZ = chunkIndexGetZ(chunkKey);
-
-            // Unload and reload to regenerate with new generator
-            instance.unloadChunk(chunkX, chunkZ);
-            instance.loadChunk(chunkX, chunkZ);
-        }
-
-        LOGGER.info("Successfully regenerated {} chunks with new generator", loadedChunks.size());
-
-        // Move players back to their original positions
-        for (Map.Entry<Player, Pos> entry : playerPositions.entrySet()) {
-            Player player = entry.getKey();
-            Pos originalPos = entry.getValue();
-            player.setInstance(instance, originalPos).join();
-        }
-        
-        if (!playerPositions.isEmpty()) {
-            LOGGER.info("Returned {} players to regenerated world", playerPositions.size());
-        }
 
         LOGGER.info("Successfully reloaded generator from: {}", source);
     }
