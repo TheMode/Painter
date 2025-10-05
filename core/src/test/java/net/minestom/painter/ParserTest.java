@@ -24,7 +24,7 @@ final class ParserTest {
             programSegment = PainterParser.parseString(program);
             assertNotNull(programSegment, "Program should parse successfully");
         } finally {
-            if (programSegment != null) PainterParser.freeProgram(programSegment);
+            PainterParser.freeProgram(programSegment);
         }
     }
 
@@ -208,8 +208,7 @@ final class ParserTest {
         if (!missing.isEmpty()) {
             fail(String.format(
                     "Palette missing entries: %s%nActual palette: %s",
-                    missing,
-                    Arrays.toString(section.palette())
+                    missing, Arrays.toString(section.palette())
             ));
         }
     }

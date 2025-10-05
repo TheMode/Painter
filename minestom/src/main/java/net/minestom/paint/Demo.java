@@ -16,6 +16,7 @@ import net.minestom.server.instance.block.Block;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,8 +86,8 @@ public final class Demo {
         // Register commands for manual reload and URL loading
         if (ENABLE_LOAD_COMMANDS) {
             CommandManager commandManager = MinecraftServer.getCommandManager();
-            commandManager.register(new ReloadCommand(instance, waitingInstance, paintFile));
-            commandManager.register(new LoadPaintCommand(instance, waitingInstance));
+            commandManager.register(new PainterCommand.ReloadCommand(instance, waitingInstance, paintFile));
+            commandManager.register(new PainterCommand.LoadPaintCommand(instance, waitingInstance));
             LOGGER.info("Commands registered: /reload, /loadpaint <url>");
         }
 
