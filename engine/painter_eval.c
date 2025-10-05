@@ -13,12 +13,13 @@ static void execute_occurrence_instruction(const Occurrence *occurrence, Executi
 static bool instruction_might_affect_section(Instruction *instr, ExecutionState *state, int origin_x, int origin_y, int origin_z);
 static bool evaluate_block_position(const BlockPlacement *placement, ExecutionState *state, int origin_x, int origin_y, int origin_z,
     int *world_x, int *world_y, int *world_z);
-static void clear_runtime_palette(ExecutionState *state);
-static bool ensure_runtime_palette_capacity(ExecutionState *state, size_t required_capacity);
 static int calculate_bits_per_entry(int palette_size);
 static void execute_occurrence_by_type(const char *type, const NamedArgumentList *args, const InstructionList *body, ExecutionState *state,
     int origin_x, int origin_y, int origin_z);
 static void occurrence_runtime_run_body(void *userdata, const InstructionList *body, int anchor_x, int anchor_y, int anchor_z);
+static void run_instruction_list(const InstructionList *list, ExecutionState *state, int origin_x, int origin_y, int origin_z);
+static void
+process_program_at_origin(Program *program, ExecutionState *state, int origin_x, int origin_y, int origin_z, bool occurrences_only);
 
 // Calculate bits needed to represent palette indices
 static int calculate_bits_per_entry(int palette_size) {
@@ -49,49 +50,6 @@ static int calculate_bits_per_entry(int palette_size) {
   if (x >= 1u << 1) bits++;
 #endif
   return bits < MIN_BITS ? MIN_BITS : bits;
-}
-
-// Ensure palette capacity
-static bool ensure_runtime_palette_capacity(ExecutionState *state, size_t required_capacity) {
-  if (!state || !state->palette || !state->palette_capacity) {
-    return false;
-  }
-
-  int required = (int)required_capacity;
-  if (*state->palette_capacity >= required) {
-    return true;
-  }
-
-  int new_capacity = *state->palette_capacity;
-  if (new_capacity <= 0) {
-    new_capacity = 8;
-  }
-
-  while (new_capacity < required) {
-    new_capacity *= 2;
-  }
-
-  char **resized = realloc(*state->palette, sizeof(char *) * new_capacity);
-  if (!resized) {
-    return false;
-  }
-
-  *state->palette = resized;
-  *state->palette_capacity = new_capacity;
-  return true;
-}
-
-// Clear runtime palette
-static void clear_runtime_palette(ExecutionState *state) {
-  if (!state || !state->palette || !state->palette_size) {
-    return;
-  }
-
-  for (int i = 0; i < *state->palette_size; i++) {
-    free((*state->palette)[i]);
-    (*state->palette)[i] = NULL;
-  }
-  *state->palette_size = 0;
 }
 
 // Evaluate block position
@@ -163,20 +121,15 @@ double painter_evaluate_expression(const Expression *expr, ExecutionState *state
       return 0.0;
     }
 
-    double *arg_values = NULL;
-    if (arg_count > 0) {
-      arg_values = malloc(sizeof(double) * arg_count);
-      if (!arg_values) {
-        return 0.0;
-      }
-      for (size_t i = 0; i < arg_count; i++) {
-        arg_values[i] = painter_evaluate_expression(expr->function_call.args.items[i], state);
-      }
+    if (arg_count == 0) {
+      return entry->function ? entry->function(NULL, 0) : 0.0;
     }
 
-    double result = entry->function ? entry->function(arg_values, arg_count) : 0.0;
-    free(arg_values);
-    return result;
+    double arg_values[arg_count];
+    for (size_t i = 0; i < arg_count; i++) {
+      arg_values[i] = painter_evaluate_expression(expr->function_call.args.items[i], state);
+    }
+    return entry->function ? entry->function(arg_values, arg_count) : 0.0;
   }
   case EXPR_COORDINATE: break;
   }
@@ -205,11 +158,6 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
       return true;
     }
 
-    // Check if the occurrence's bounding box (offset by origin) intersects current section
-    int section_x = state->base_x / 16;
-    int section_y = state->base_y / 16;
-    int section_z = state->base_z / 16;
-
     // Calculate world-space bounds. The origin parameters are offsets relative
     // to the current section base (state->base_*). Include state->base_* so
     // the computed world bounds reflect the true world coordinates for this
@@ -237,19 +185,22 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
 }
 
 // Occurrence runtime callback
-static void occurrence_runtime_run_body(void *userdata, const InstructionList *body, int anchor_x, int anchor_y, int anchor_z) {
-  ExecutionState *state = (ExecutionState *)userdata;
-  if (!state || !body) {
-    return;
-  }
+static void run_instruction_list(const InstructionList *list, ExecutionState *state, int origin_x, int origin_y, int origin_z) {
+  if (!list || !state) return;
 
-  for (size_t i = 0; i < body->count; i++) {
-    Instruction *child = body->items[i];
-    if (!instruction_might_affect_section(child, state, anchor_x, anchor_y, anchor_z)) {
+  for (size_t i = 0; i < list->count; i++) {
+    Instruction *child = list->items[i];
+    if (!instruction_might_affect_section(child, state, origin_x, origin_y, origin_z)) {
       continue;
     }
-    process_instruction(child, state, anchor_x, anchor_y, anchor_z);
+    process_instruction(child, state, origin_x, origin_y, origin_z);
   }
+}
+
+static void occurrence_runtime_run_body(void *userdata, const InstructionList *body, int anchor_x, int anchor_y, int anchor_z) {
+  ExecutionState *state = (ExecutionState *)userdata;
+  if (!state || !body) return;
+  run_instruction_list(body, state, anchor_x, anchor_y, anchor_z);
 }
 
 // Execute occurrence by type
@@ -352,14 +303,7 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
 
     for (int i = start; i < end; i++) {
       context_set(state->variables, loop->variable, (double)i);
-
-      for (size_t j = 0; j < loop->body.count; j++) {
-        Instruction *child = loop->body.items[j];
-        if (!instruction_might_affect_section(child, state, origin_x, origin_y, origin_z)) {
-          continue;
-        }
-        process_instruction(child, state, origin_x, origin_y, origin_z);
-      }
+      run_instruction_list(&loop->body, state, origin_x, origin_y, origin_z);
     }
     break;
   }
@@ -381,14 +325,7 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
       }
 
       if (should_execute) {
-        // Execute this branch and stop checking further branches
-        for (size_t j = 0; j < branch->body.count; j++) {
-          Instruction *child = branch->body.items[j];
-          if (!instruction_might_affect_section(child, state, origin_x, origin_y, origin_z)) {
-            continue;
-          }
-          process_instruction(child, state, origin_x, origin_y, origin_z);
-        }
+        run_instruction_list(&branch->body, state, origin_x, origin_y, origin_z);
         break; // Don't check remaining elif/else branches
       }
     }
@@ -419,6 +356,18 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
     }
     break;
   }
+  }
+}
+
+static void
+process_program_at_origin(Program *program, ExecutionState *state, int origin_x, int origin_y, int origin_z, bool occurrences_only) {
+  if (!program || !state) return;
+
+  for (int i = 0; i < program->instruction_count; i++) {
+    Instruction *instr = program->instructions[i];
+    if (occurrences_only && instr->type != INSTR_OCCURRENCE) continue;
+    if (!instruction_might_affect_section(instr, state, origin_x, origin_y, origin_z)) continue;
+    process_instruction(instr, state, origin_x, origin_y, origin_z);
   }
 }
 
@@ -479,13 +428,7 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
   }
 
   // Process all instructions from origin [0, 0, 0]
-  for (int i = 0; i < program->instruction_count; i++) {
-    Instruction *instr = program->instructions[i];
-    if (!instruction_might_affect_section(instr, &state, 0, 0, 0)) {
-      continue;
-    }
-    process_instruction(instr, &state, 0, 0, 0);
-  }
+  process_program_at_origin(program, &state, 0, 0, 0, false);
 
   // Check for occurrences from neighboring sections that might affect this section
   // This enables cross-section structures like trees
@@ -498,18 +441,7 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
         int neighbor_origin_x = dx * 16;
         int neighbor_origin_y = dy * 16;
         int neighbor_origin_z = dz * 16;
-
-        // Check each instruction to see if it might affect current section from neighbor
-        for (int i = 0; i < program->instruction_count; i++) {
-          Instruction *instr = program->instructions[i];
-
-          // Only check occurrences (as they're the ones that span sections)
-          if (instr->type == INSTR_OCCURRENCE) {
-            if (instruction_might_affect_section(instr, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z)) {
-              process_instruction(instr, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z);
-            }
-          }
-        }
+        process_program_at_origin(program, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z, true);
       }
     }
   }

@@ -1,14 +1,14 @@
 #include "painter.h"
-#include "painter_eval.h"
 #include "builtin_functions.h"
 #include "builtin_macros.h"
 #include "builtin_occurrences.h"
+#include "painter_eval.h"
+#include <ctype.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 // Forward declaration for bounds tracking
 static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range);
@@ -36,32 +36,114 @@ static bool ensure_capacity(Parser *parser, void **buffer, size_t *capacity, siz
   return true;
 }
 
-static inline void instruction_list_reset(InstructionList *list) {
-  list->items = NULL;
-  list->count = 0;
-  list->capacity = 0;
-  list->has_bounds = false;
-  list->min_x = list->max_x = 0;
-  list->min_y = list->max_y = 0;
-  list->min_z = list->max_z = 0;
+static void instruction_list_init(InstructionList *list) {
+  if (list) *list = (InstructionList){0};
 }
 
-static inline void expression_list_reset(ExpressionList *list) {
-  list->items = NULL;
-  list->count = 0;
-  list->capacity = 0;
+static void expression_list_init(ExpressionList *list) {
+  if (list) *list = (ExpressionList){0};
 }
 
-static inline void named_argument_list_reset(NamedArgumentList *list) {
-  list->items = NULL;
-  list->count = 0;
-  list->capacity = 0;
+static void named_argument_list_init(NamedArgumentList *list) {
+  if (list) *list = (NamedArgumentList){0};
 }
 
-static inline void palette_entry_list_reset(PaletteEntryList *list) {
-  list->items = NULL;
-  list->count = 0;
-  list->capacity = 0;
+static void palette_entry_list_init(PaletteEntryList *list) {
+  if (list) *list = (PaletteEntryList){0};
+}
+
+static void expression_list_destroy(ExpressionList *list) {
+  if (!list) return;
+  for (size_t i = 0; i < list->count; i++) {
+    expression_free(list->items[i]);
+  }
+  free(list->items);
+  *list = (ExpressionList){0};
+}
+
+static void named_argument_list_destroy(NamedArgumentList *list) {
+  if (!list) return;
+  for (size_t i = 0; i < list->count; i++) {
+    expression_free(list->items[i].value);
+  }
+  free(list->items);
+  *list = (NamedArgumentList){0};
+}
+
+static void palette_entry_list_destroy(PaletteEntryList *list) {
+  if (!list) return;
+  free(list->items);
+  *list = (PaletteEntryList){0};
+}
+
+static bool palette_entry_list_copy(PaletteEntryList *dest, const PaletteEntryList *src) {
+  if (!dest || !src) return false;
+  palette_entry_list_destroy(dest);
+  if (src->count == 0) return true;
+
+  dest->items = malloc(sizeof(PaletteEntry) * src->count);
+  if (!dest->items) return false;
+
+  memcpy(dest->items, src->items, sizeof(PaletteEntry) * src->count);
+  dest->count = dest->capacity = src->count;
+  return true;
+}
+
+static PaletteDefinition *palette_definition_clone(const PaletteDefinition *definition) {
+  if (!definition) return NULL;
+
+  PaletteDefinition *copy = malloc(sizeof(*copy));
+  if (!copy) return NULL;
+
+  *copy = (PaletteDefinition){0};
+  strncpy(copy->name, definition->name, sizeof(copy->name) - 1);
+  if (!palette_entry_list_copy(&copy->entries, &definition->entries)) {
+    free(copy);
+    return NULL;
+  }
+  return copy;
+}
+
+static void palette_definition_destroy(PaletteDefinition *definition) {
+  if (!definition) return;
+  palette_entry_list_destroy(&definition->entries);
+  free(definition);
+}
+
+static void instruction_list_destroy(InstructionList *list) {
+  if (!list) return;
+  for (size_t i = 0; i < list->count; i++) {
+    instruction_free(list->items[i]);
+  }
+  free(list->items);
+  *list = (InstructionList){0};
+}
+
+static void conditional_branch_destroy(ConditionalBranch *branch) {
+  if (!branch) return;
+  expression_free(branch->condition);
+  instruction_list_destroy(&branch->body);
+}
+
+static void if_statement_destroy(IfStatement *if_stmt) {
+  if (!if_stmt) return;
+  for (size_t i = 0; i < if_stmt->branch_count; i++) {
+    conditional_branch_destroy(&if_stmt->branches[i]);
+  }
+  free(if_stmt->branches);
+  *if_stmt = (IfStatement){0};
+}
+
+static void occurrence_destroy(Occurrence *occurrence) {
+  if (!occurrence) return;
+  named_argument_list_destroy(&occurrence->args);
+  expression_free(occurrence->condition);
+  instruction_list_destroy(&occurrence->body);
+}
+
+static void macro_call_destroy(MacroCall *macro) {
+  if (!macro) return;
+  named_argument_list_destroy(&macro->arguments);
 }
 
 static bool instruction_list_push(Parser *parser, InstructionList *list, Instruction *instr) {
@@ -366,8 +448,6 @@ static Expression *parse_additive(Parser *parser) {
           if (prev == ' ' || prev == '\t' || prev == '\n' || prev == '\r' || prev == '\v' || prev == '\f') {
             break; // treat as start of next expression (signed literal)
           }
-        } else {
-          fprintf(stderr, "DEBUG parse_additive: op_start not > input start\n");
         }
       }
     }
@@ -495,7 +575,7 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
   expr->type = EXPR_FUNCTION_CALL;
   strncpy(expr->function_call.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   expr->function_call.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  expression_list_reset(&expr->function_call.args);
+  expression_list_init(&expr->function_call.args);
 
   // Parse arguments if any
   if (peek_type() != TOKEN_RIGHT_PAREN && peek_type() != TOKEN_EOF) {
@@ -579,12 +659,12 @@ static BlockPlacement parse_block_placement(Parser *parser) {
       tokenizer_next_token(&parser->tokenizer); // consume identifier
       Token token_after_id = tokenizer_peek_token(&parser->tokenizer);
       parser->tokenizer = saved_state; // restore state
-      
+
       if (token_after_id.type == TOKEN_EQUAL) {
         is_block_properties = true;
       }
     }
-    
+
     if (is_block_properties) {
       next(); // consume '['
 
@@ -609,7 +689,7 @@ static BlockPlacement parse_block_placement(Parser *parser) {
 
 static ForLoop parse_for_loop(Parser *parser) {
   ForLoop loop = {0};
-  instruction_list_reset(&loop.body);
+  instruction_list_init(&loop.body);
 
   // 'for' keyword is already consumed by caller
 
@@ -687,7 +767,7 @@ static IfStatement parse_if_statement(Parser *parser) {
     }
 
     ConditionalBranch *branch = &if_stmt.branches[if_stmt.branch_count];
-    instruction_list_reset(&branch->body);
+    instruction_list_init(&branch->body);
 
     // Check if this is an 'else' branch (no condition)
     if (if_stmt.branch_count > 0 && consume_keyword("else")) {
@@ -779,7 +859,7 @@ static IfStatement parse_if_statement(Parser *parser) {
 }
 
 static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
-  named_argument_list_reset(&occurrence->args);
+  named_argument_list_init(&occurrence->args);
   occurrence->condition = NULL;
 
   // Parse arguments (.name=value)
@@ -823,7 +903,7 @@ static bool parse_occurrence_header(Parser *parser, Occurrence *occurrence) {
 }
 
 static bool parse_occurrence_body(Parser *parser, Occurrence *occurrence) {
-  instruction_list_reset(&occurrence->body);
+  instruction_list_init(&occurrence->body);
 
   if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' after occurrence header")) {
     return false;
@@ -854,8 +934,8 @@ static Occurrence parse_occurrence(Parser *parser) {
   occurrence.kind = OCCURRENCE_KIND_IMMEDIATE;
   occurrence.name[0] = '\0';
   occurrence.condition = NULL;
-  named_argument_list_reset(&occurrence.args);
-  instruction_list_reset(&occurrence.body);
+  named_argument_list_init(&occurrence.args);
+  instruction_list_init(&occurrence.body);
 
   next(); // consume '@'
 
@@ -886,8 +966,8 @@ static Occurrence parse_occurrence_definition(Parser *parser, const char *name) 
   strncpy(occurrence.name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   occurrence.condition = NULL;
-  named_argument_list_reset(&occurrence.args);
-  instruction_list_reset(&occurrence.body);
+  named_argument_list_init(&occurrence.args);
+  instruction_list_init(&occurrence.body);
 
   if (!consume(TOKEN_AT)) {
     parser_error(parser, "Expected '@' for occurrence definition");
@@ -918,8 +998,8 @@ static Occurrence parse_occurrence_reference(Parser *parser, const char *name) {
   occurrence.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   occurrence.type[0] = '\0';
   occurrence.condition = NULL;
-  named_argument_list_reset(&occurrence.args);
-  instruction_list_reset(&occurrence.body);
+  named_argument_list_init(&occurrence.args);
+  instruction_list_init(&occurrence.body);
 
   if (!parse_occurrence_body(parser, &occurrence)) {
     return occurrence;
@@ -930,7 +1010,7 @@ static Occurrence parse_occurrence_reference(Parser *parser, const char *name) {
 
 static PaletteDefinition parse_palette_definition(Parser *parser) {
   PaletteDefinition palette = {0};
-  palette_entry_list_reset(&palette.entries);
+  palette_entry_list_init(&palette.entries);
 
   // Name is already parsed in assignment
   if (!expect_token(parser, TOKEN_LEFT_BRACE, "Expected '{' for palette definition")) {
@@ -1018,7 +1098,7 @@ static PaletteDefinition parse_palette_definition(Parser *parser) {
 
 static MacroCall parse_macro_call(Parser *parser) {
   MacroCall macro = {0};
-  named_argument_list_reset(&macro.arguments);
+  named_argument_list_init(&macro.arguments);
 
   // Consume '#'
   next();
@@ -1190,11 +1270,6 @@ static Instruction *parse_instruction(Parser *parser) {
   }
 
   parser_error(parser, "Unexpected token");
-  // Debug: report current peek token
-  {
-    Token t = tokenizer_peek_token(&parser->tokenizer);
-    fprintf(stderr, "DEBUG parse_instruction: unexpected token=%s '%s' (line=%zu col=%zu)\n", token_type_to_string(t.type), t.value, parser->tokenizer.line, parser->tokenizer.column);
-  }
   free(instr);
   return NULL;
 }
@@ -1269,7 +1344,7 @@ static Expression *expression_copy(const Expression *expr) {
     break;
   case EXPR_FUNCTION_CALL:
     strncpy(copy->function_call.name, expr->function_call.name, MAX_TOKEN_VALUE_LENGTH);
-    expression_list_reset(&copy->function_call.args);
+    expression_list_init(&copy->function_call.args);
     for (size_t i = 0; i < expr->function_call.args.count; i++) {
       Expression *arg_copy = expression_copy(expr->function_call.args.items[i]);
       if (!arg_copy || !expression_list_push(NULL, &copy->function_call.args, arg_copy)) {
@@ -1299,12 +1374,7 @@ void expression_free(Expression *expr) {
     expression_free(expr->coordinate.y);
     expression_free(expr->coordinate.z);
     break;
-  case EXPR_FUNCTION_CALL:
-    for (size_t i = 0; i < expr->function_call.args.count; i++) {
-      expression_free(expr->function_call.args.items[i]);
-    }
-    free(expr->function_call.args.items);
-    break;
+  case EXPR_FUNCTION_CALL: expression_list_destroy(&expr->function_call.args); break;
   default: break;
   }
 
@@ -1318,14 +1388,8 @@ void instruction_free(Instruction *instr) {
   case INSTR_BLOCK_PLACEMENT: expression_free(instr->block_placement.coordinate); break;
   case INSTR_ASSIGNMENT:
     if (instr->assignment.is_palette_definition) {
-      if (instr->assignment.palette_definition) {
-        for (size_t i = 0; i < instr->assignment.palette_definition->entries.count; i++) {
-          /* nothing to free inside entries (they are fixed-size arrays), but free items array */
-        }
-        free(instr->assignment.palette_definition->entries.items);
-        free(instr->assignment.palette_definition);
-        instr->assignment.palette_definition = NULL;
-      }
+      palette_definition_destroy(instr->assignment.palette_definition);
+      instr->assignment.palette_definition = NULL;
     } else {
       expression_free(instr->assignment.value);
     }
@@ -1333,39 +1397,11 @@ void instruction_free(Instruction *instr) {
   case INSTR_FOR_LOOP:
     expression_free(instr->for_loop.start);
     expression_free(instr->for_loop.end);
-    for (size_t i = 0; i < instr->for_loop.body.count; i++) {
-      instruction_free(instr->for_loop.body.items[i]);
-    }
-    free(instr->for_loop.body.items);
+    instruction_list_destroy(&instr->for_loop.body);
     break;
-  case INSTR_IF_STATEMENT:
-    for (size_t i = 0; i < instr->if_statement.branch_count; i++) {
-      ConditionalBranch *branch = &instr->if_statement.branches[i];
-      expression_free(branch->condition);
-      for (size_t j = 0; j < branch->body.count; j++) {
-        instruction_free(branch->body.items[j]);
-      }
-      free(branch->body.items);
-    }
-    free(instr->if_statement.branches);
-    break;
-  case INSTR_OCCURRENCE:
-    for (size_t i = 0; i < instr->occurrence.args.count; i++) {
-      expression_free(instr->occurrence.args.items[i].value);
-    }
-    free(instr->occurrence.args.items);
-    expression_free(instr->occurrence.condition);
-    for (size_t i = 0; i < instr->occurrence.body.count; i++) {
-      instruction_free(instr->occurrence.body.items[i]);
-    }
-    free(instr->occurrence.body.items);
-    break;
-  case INSTR_MACRO_CALL:
-    for (size_t i = 0; i < instr->macro_call.arguments.count; i++) {
-      expression_free(instr->macro_call.arguments.items[i].value);
-    }
-    free(instr->macro_call.arguments.items);
-    break;
+  case INSTR_IF_STATEMENT: if_statement_destroy(&instr->if_statement); break;
+  case INSTR_OCCURRENCE: occurrence_destroy(&instr->occurrence); break;
+  case INSTR_MACRO_CALL: macro_call_destroy(&instr->macro_call); break;
   }
 
   free(instr);
@@ -1424,13 +1460,28 @@ void occurrence_registry_init(OccurrenceRegistry *registry) {
 
 static void occurrence_registry_entry_free(OccurrenceRegistryEntry *entry) {
   if (!entry) return;
-  for (size_t i = 0; i < entry->args.count; i++) {
-    expression_free(entry->args.items[i].value);
+  named_argument_list_destroy(&entry->args);
+}
+
+static bool named_argument_list_clone(Parser *parser, NamedArgumentList *dest, const NamedArgumentList *src) {
+  if (!dest || !src) return false;
+
+  named_argument_list_destroy(dest);
+  named_argument_list_init(dest);
+
+  for (size_t i = 0; i < src->count; i++) {
+    NamedArgument argument = (NamedArgument){0};
+    strncpy(argument.name, src->items[i].name, MAX_TOKEN_VALUE_LENGTH - 1);
+    argument.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
+    argument.value = expression_copy(src->items[i].value);
+    if (!argument.value || !named_argument_list_push(parser, dest, argument)) {
+      expression_free(argument.value);
+      named_argument_list_destroy(dest);
+      return false;
+    }
   }
-  free(entry->args.items);
-  entry->args.items = NULL;
-  entry->args.count = 0;
-  entry->args.capacity = 0;
+
+  return true;
 }
 
 void occurrence_registry_free(OccurrenceRegistry *registry) {
@@ -1464,29 +1515,22 @@ bool occurrence_registry_set(OccurrenceRegistry *registry, const char *name, con
     }
 
     entry = &registry->entries[registry->entry_count++];
-    named_argument_list_reset(&entry->args);
+    *entry = (OccurrenceRegistryEntry){0};
     strncpy(entry->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
     entry->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
   } else {
     occurrence_registry_entry_free(entry);
-    named_argument_list_reset(&entry->args);
   }
 
   strncpy(entry->type, type, MAX_TOKEN_VALUE_LENGTH - 1);
   entry->type[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
 
-  // Deep copy the arguments
   if (args && args->count > 0) {
-    for (size_t i = 0; i < args->count; i++) {
-      NamedArgument arg_copy = {0};
-      strncpy(arg_copy.name, args->items[i].name, MAX_TOKEN_VALUE_LENGTH - 1);
-      arg_copy.name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-      arg_copy.value = expression_copy(args->items[i].value);
-      if (!arg_copy.value || !named_argument_list_push(NULL, &entry->args, arg_copy)) {
-        expression_free(arg_copy.value);
-        return false;
-      }
+    if (!named_argument_list_clone(NULL, &entry->args, args)) {
+      return false;
     }
+  } else {
+    named_argument_list_destroy(&entry->args);
   }
 
   return true;
@@ -1593,9 +1637,7 @@ void context_free(VariableContext *ctx) {
   if (!ctx) return;
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
-      // free palette entries
-      free(ctx->variables[i].v.palette->entries.items);
-      free(ctx->variables[i].v.palette);
+      palette_definition_destroy(ctx->variables[i].v.palette);
       ctx->variables[i].v.palette = NULL;
     }
   }
@@ -1630,29 +1672,14 @@ void context_set(VariableContext *ctx, const char *name, double value) {
 void context_set_palette(VariableContext *ctx, const char *name, const PaletteDefinition *definition) {
   if (!ctx || !name || !definition) return;
 
+  PaletteDefinition *copy = palette_definition_clone(definition);
+  if (!copy) return;
+
   // Find existing
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
-      // free old palette if present
-      if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
-        free(ctx->variables[i].v.palette->entries.items);
-        free(ctx->variables[i].v.palette);
-      }
-      PaletteDefinition *copy = malloc(sizeof(PaletteDefinition));
-      if (!copy) return;
-      *copy = *definition;
-      // deep-copy entries array
-      if (definition->entries.count > 0) {
-        size_t bytes = sizeof(PaletteEntry) * definition->entries.count;
-        copy->entries.items = malloc(bytes);
-        if (!copy->entries.items) { free(copy); return; }
-        memcpy(copy->entries.items, definition->entries.items, bytes);
-        copy->entries.count = definition->entries.count;
-        copy->entries.capacity = definition->entries.count;
-      } else {
-        copy->entries.items = NULL;
-        copy->entries.count = 0;
-        copy->entries.capacity = 0;
+      if (ctx->variables[i].type == VAR_PALETTE) {
+        palette_definition_destroy(ctx->variables[i].v.palette);
       }
       ctx->variables[i].type = VAR_PALETTE;
       ctx->variables[i].v.palette = copy;
@@ -1662,27 +1689,13 @@ void context_set_palette(VariableContext *ctx, const char *name, const PaletteDe
 
   // Add new variable
   if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity, ctx->variable_count, sizeof(*ctx->variables))) {
+    palette_definition_destroy(copy);
     return;
   }
 
   Variable *variable = &ctx->variables[ctx->variable_count++];
   strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH - 1);
   variable->name[MAX_TOKEN_VALUE_LENGTH - 1] = '\0';
-  PaletteDefinition *copy = malloc(sizeof(PaletteDefinition));
-  if (!copy) return;
-  *copy = *definition;
-  if (definition->entries.count > 0) {
-    size_t bytes = sizeof(PaletteEntry) * definition->entries.count;
-    copy->entries.items = malloc(bytes);
-    if (!copy->entries.items) { free(copy); return; }
-    memcpy(copy->entries.items, definition->entries.items, bytes);
-    copy->entries.count = definition->entries.count;
-    copy->entries.capacity = definition->entries.count;
-  } else {
-    copy->entries.items = NULL;
-    copy->entries.count = 0;
-    copy->entries.capacity = 0;
-  }
   variable->type = VAR_PALETTE;
   variable->v.palette = copy;
 }
@@ -1733,7 +1746,7 @@ void instruction_list_init_bounds(InstructionList *list) {
 
 void instruction_list_expand_bounds(InstructionList *list, int x, int y, int z) {
   if (!list) return;
-  
+
   if (!list->has_bounds) {
     list->has_bounds = true;
     list->min_x = list->max_x = x;
@@ -1751,7 +1764,7 @@ void instruction_list_expand_bounds(InstructionList *list, int x, int y, int z) 
 
 void instruction_list_merge_bounds(InstructionList *dest, const InstructionList *src) {
   if (!dest || !src || !src->has_bounds) return;
-  
+
   if (!dest->has_bounds) {
     dest->has_bounds = true;
     dest->min_x = src->min_x;
@@ -1772,7 +1785,7 @@ void instruction_list_merge_bounds(InstructionList *dest, const InstructionList 
 
 bool instruction_list_intersects_section(const InstructionList *list, int section_x, int section_y, int section_z) {
   if (!list || !list->has_bounds) return false;
-  
+
   // Convert section coordinates to world coordinates
   const int base_x = section_x * 16;
   const int base_y = section_y * 16;
@@ -1780,11 +1793,10 @@ bool instruction_list_intersects_section(const InstructionList *list, int sectio
   const int max_x = base_x + 15;
   const int max_y = base_y + 15;
   const int max_z = base_z + 15;
-  
+
   // Check if bounding boxes intersect
-  return !(list->max_x < base_x || list->min_x > max_x ||
-           list->max_y < base_y || list->min_y > max_y ||
-           list->max_z < base_z || list->min_z > max_z);
+  return !(list->max_x < base_x || list->min_x > max_x || list->max_y < base_y || list->min_y > max_y || list->max_z < base_z ||
+           list->min_z > max_z);
 }
 
 // Helper to estimate bounds from an expression (conservative estimate for non-literals)
@@ -1793,116 +1805,113 @@ static void estimate_expression_bounds(const Expression *expr, int *min_val, int
     *min_val = *max_val = 0;
     return;
   }
-  
+
   switch (expr->type) {
-    case EXPR_NUMBER:
-      *min_val = *max_val = (int)expr->number;
+  case EXPR_NUMBER: *min_val = *max_val = (int)expr->number; break;
+  case EXPR_IDENTIFIER:
+  case EXPR_FUNCTION_CALL:
+    // For unknowns, use conservative range
+    *min_val = -conservative_range;
+    *max_val = conservative_range;
+    break;
+  case EXPR_BINARY_OP: {
+    int left_min, left_max, right_min, right_max;
+    estimate_expression_bounds(expr->binary.left, &left_min, &left_max, conservative_range);
+    estimate_expression_bounds(expr->binary.right, &right_min, &right_max, conservative_range);
+
+    switch (expr->binary.op) {
+    case OP_ADD:
+      *min_val = left_min + right_min;
+      *max_val = left_max + right_max;
       break;
-    case EXPR_IDENTIFIER:
-    case EXPR_FUNCTION_CALL:
-      // For unknowns, use conservative range
-      *min_val = -conservative_range;
-      *max_val = conservative_range;
+    case OP_SUBTRACT:
+      *min_val = left_min - right_max;
+      *max_val = left_max - right_min;
       break;
-    case EXPR_BINARY_OP: {
-      int left_min, left_max, right_min, right_max;
-      estimate_expression_bounds(expr->binary.left, &left_min, &left_max, conservative_range);
-      estimate_expression_bounds(expr->binary.right, &right_min, &right_max, conservative_range);
-      
-      switch (expr->binary.op) {
-        case OP_ADD:
-          *min_val = left_min + right_min;
-          *max_val = left_max + right_max;
-          break;
-        case OP_SUBTRACT:
-          *min_val = left_min - right_max;
-          *max_val = left_max - right_min;
-          break;
-        case OP_MULTIPLY:
-          // Take the extremes
-          *min_val = left_min * right_min;
-          *max_val = left_max * right_max;
-          if (left_min * right_max < *min_val) *min_val = left_min * right_max;
-          if (left_max * right_min < *min_val) *min_val = left_max * right_min;
-          if (left_min * right_max > *max_val) *max_val = left_min * right_max;
-          if (left_max * right_min > *max_val) *max_val = left_max * right_min;
-          break;
-        default:
-          // For comparisons and other ops, use conservative range
-          *min_val = -conservative_range;
-          *max_val = conservative_range;
-          break;
-      }
-      break;
-    }
-    case EXPR_UNARY_OP:
-      estimate_expression_bounds(expr->unary.operand, min_val, max_val, conservative_range);
-      if (expr->unary.op == OP_NEGATE) {
-        int tmp = *min_val;
-        *min_val = -*max_val;
-        *max_val = -tmp;
-      }
+    case OP_MULTIPLY:
+      // Take the extremes
+      *min_val = left_min * right_min;
+      *max_val = left_max * right_max;
+      if (left_min * right_max < *min_val) *min_val = left_min * right_max;
+      if (left_max * right_min < *min_val) *min_val = left_max * right_min;
+      if (left_min * right_max > *max_val) *max_val = left_min * right_max;
+      if (left_max * right_min > *max_val) *max_val = left_max * right_min;
       break;
     default:
+      // For comparisons and other ops, use conservative range
       *min_val = -conservative_range;
       *max_val = conservative_range;
       break;
+    }
+    break;
+  }
+  case EXPR_UNARY_OP:
+    estimate_expression_bounds(expr->unary.operand, min_val, max_val, conservative_range);
+    if (expr->unary.op == OP_NEGATE) {
+      int tmp = *min_val;
+      *min_val = -*max_val;
+      *max_val = -tmp;
+    }
+    break;
+  default:
+    *min_val = -conservative_range;
+    *max_val = conservative_range;
+    break;
   }
 }
 
 // Update instruction list bounds based on an instruction
 static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range) {
   if (!list || !instr) return;
-  
+
   switch (instr->type) {
-    case INSTR_BLOCK_PLACEMENT: {
-      const BlockPlacement *placement = &instr->block_placement;
-      if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
-        int x_min, x_max, y_min, y_max, z_min, z_max;
-        estimate_expression_bounds(placement->coordinate->coordinate.x, &x_min, &x_max, conservative_range);
-        
-        if (placement->coordinate->coordinate.y) {
-          estimate_expression_bounds(placement->coordinate->coordinate.y, &y_min, &y_max, conservative_range);
-        } else {
-          y_min = y_max = 0;
-        }
-        
-        if (placement->coordinate->coordinate.z) {
-          estimate_expression_bounds(placement->coordinate->coordinate.z, &z_min, &z_max, conservative_range);
-        } else {
-          z_min = z_max = 0;
-        }
-        
-        instruction_list_expand_bounds(list, x_min, y_min, z_min);
-        instruction_list_expand_bounds(list, x_max, y_max, z_max);
+  case INSTR_BLOCK_PLACEMENT: {
+    const BlockPlacement *placement = &instr->block_placement;
+    if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
+      int x_min, x_max, y_min, y_max, z_min, z_max;
+      estimate_expression_bounds(placement->coordinate->coordinate.x, &x_min, &x_max, conservative_range);
+
+      if (placement->coordinate->coordinate.y) {
+        estimate_expression_bounds(placement->coordinate->coordinate.y, &y_min, &y_max, conservative_range);
+      } else {
+        y_min = y_max = 0;
       }
-      break;
-    }
-    case INSTR_FOR_LOOP: {
-      const ForLoop *loop = &instr->for_loop;
-      if (loop->body.has_bounds) {
-        // Merge loop body bounds (potentially expanded by loop range)
-        instruction_list_merge_bounds(list, &loop->body);
+
+      if (placement->coordinate->coordinate.z) {
+        estimate_expression_bounds(placement->coordinate->coordinate.z, &z_min, &z_max, conservative_range);
+      } else {
+        z_min = z_max = 0;
       }
-      break;
+
+      instruction_list_expand_bounds(list, x_min, y_min, z_min);
+      instruction_list_expand_bounds(list, x_max, y_max, z_max);
     }
-    case INSTR_IF_STATEMENT: {
-      const IfStatement *if_stmt = &instr->if_statement;
-      for (size_t i = 0; i < if_stmt->branch_count; i++) {
-        if (if_stmt->branches[i].body.has_bounds) {
-          instruction_list_merge_bounds(list, &if_stmt->branches[i].body);
-        }
+    break;
+  }
+  case INSTR_FOR_LOOP: {
+    const ForLoop *loop = &instr->for_loop;
+    if (loop->body.has_bounds) {
+      // Merge loop body bounds (potentially expanded by loop range)
+      instruction_list_merge_bounds(list, &loop->body);
+    }
+    break;
+  }
+  case INSTR_IF_STATEMENT: {
+    const IfStatement *if_stmt = &instr->if_statement;
+    for (size_t i = 0; i < if_stmt->branch_count; i++) {
+      if (if_stmt->branches[i].body.has_bounds) {
+        instruction_list_merge_bounds(list, &if_stmt->branches[i].body);
       }
-      break;
     }
-    case INSTR_OCCURRENCE: {
-      const Occurrence *occ = &instr->occurrence;
-      if (occ->body.has_bounds) {
-        instruction_list_merge_bounds(list, &occ->body);
-      }
-      break;
+    break;
+  }
+  case INSTR_OCCURRENCE: {
+    const Occurrence *occ = &instr->occurrence;
+    if (occ->body.has_bounds) {
+      instruction_list_merge_bounds(list, &occ->body);
     }
-    default:
-      break;
+    break;
+  }
+  default: break;
   }
 }
