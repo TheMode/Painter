@@ -1,5 +1,8 @@
 package net.minestom.paint;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.format.TextColor;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.adventure.audience.Audiences;
 import net.minestom.server.command.CommandManager;
@@ -9,15 +12,21 @@ import net.minestom.server.entity.Player;
 import net.minestom.server.event.GlobalEventHandler;
 import net.minestom.server.event.player.AsyncPlayerConfigurationEvent;
 import net.minestom.server.event.player.PlayerSpawnEvent;
+import net.minestom.server.event.server.ServerListPingEvent;
+import net.minestom.server.extras.lan.OpenToLAN;
+import net.minestom.server.extras.lan.OpenToLANConfig;
 import net.minestom.server.instance.InstanceContainer;
 import net.minestom.server.instance.InstanceManager;
 import net.minestom.server.instance.LightingChunk;
+import net.minestom.server.ping.Status;
+import net.minestom.server.utils.time.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 
 import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.*;
@@ -30,6 +39,11 @@ public final class Demo {
     private static final boolean ENABLE_LOAD_COMMANDS = Boolean.parseBoolean(
             System.getProperty("painter.enableLoadCommands", "true")
     );
+
+    private static final Component SHOWCASE_MOTD = Component.text()
+            .append(gradientText("Painter", TextColor.color(0xFF6C32), TextColor.color(0xFF76B6)))
+            .append(text(" showcase", GRAY))
+            .build();
 
     static void main(String[] args) throws IOException {
         MinecraftServer minecraftServer = MinecraftServer.init();
@@ -84,6 +98,8 @@ public final class Demo {
 
         // Add an event callback to specify the spawning instance (and the spawn position)
         GlobalEventHandler globalEventHandler = MinecraftServer.getGlobalEventHandler();
+        globalEventHandler.addListener(ServerListPingEvent.class, event ->
+                event.setStatus(Status.builder().description(SHOWCASE_MOTD).build()));
         globalEventHandler.addListener(AsyncPlayerConfigurationEvent.class, event -> {
             final Player player = event.getPlayer();
             event.setSpawningInstance(instance);
@@ -123,8 +139,26 @@ public final class Demo {
             }
         }));
 
+        OpenToLAN.open(new OpenToLANConfig().eventCallDelay(Duration.of(1, TimeUnit.DAY)));
+
         minecraftServer.start("0.0.0.0", 25565);
         LOGGER.info("Server started! Live reload features: file_watcher={}, commands={}",
                 ENABLE_FILE_WATCHER, ENABLE_LOAD_COMMANDS);
+    }
+
+    private static Component gradientText(String text, TextColor start, TextColor end) {
+        if (text.isEmpty()) {
+            return Component.empty();
+        }
+        int length = text.length();
+        TextComponent.Builder builder = Component.text();
+        for (int i = 0; i < length; i++) {
+            float ratio = length == 1 ? 0 : (float) i / (length - 1);
+            int red = Math.round(start.red() + (end.red() - start.red()) * ratio);
+            int green = Math.round(start.green() + (end.green() - start.green()) * ratio);
+            int blue = Math.round(start.blue() + (end.blue() - start.blue()) * ratio);
+            builder.append(Component.text(String.valueOf(text.charAt(i)), TextColor.color(red, green, blue)));
+        }
+        return builder.build();
     }
 }
