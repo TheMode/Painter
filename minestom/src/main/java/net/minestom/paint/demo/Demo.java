@@ -145,7 +145,7 @@ public final class Demo {
         events.addListener(AsyncPlayerConfigurationEvent.class, event -> {
             Player player = event.getPlayer();
             event.setSpawningInstance(instance);
-            player.setRespawnPoint(new Pos(0, 42, 0));
+            player.setRespawnPoint(new Pos(0, 100, 0));
             player.setGameMode(GameMode.CREATIVE);
         });
         events.addListener(PlayerSpawnEvent.class, event -> {

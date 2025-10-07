@@ -1,4 +1,5 @@
 #include "builtin_functions.h"
+#include "FastNoiseLite.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -145,6 +146,37 @@ static double fn_equal(const double *args, size_t count) {
   return fabs(args[0] - args[1]) <= tolerance ? 1.0 : 0.0;
 }
 
+static double fn_noise2d(const double *args, size_t count) {
+  (void)count;
+  const float x = (float)args[0];
+  const float z = (float)args[1];
+  const float frequency = (float)args[2];
+  const int seed = (int)args[3];
+
+  fnl_state noise = fnlCreateState();
+  noise.seed = seed;
+  noise.frequency = frequency;
+  noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
+
+  return (double)fnlGetNoise2D(&noise, x, z);
+}
+
+static double fn_noise3d(const double *args, size_t count) {
+  (void)count;
+  const float x = (float)args[0];
+  const float y = (float)args[1];
+  const float z = (float)args[2];
+  const float frequency = (float)args[3];
+  const int seed = (int)args[4];
+
+  fnl_state noise = fnlCreateState();
+  noise.seed = seed;
+  noise.frequency = frequency;
+  noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
+
+  return (double)fnlGetNoise3D(&noise, x, y, z);
+}
+
 const BuiltinFunctionSpec BUILTIN_FUNCTIONS[] = {
     {"min", 1, SIZE_MAX, fn_min},
     {"max", 1, SIZE_MAX, fn_max},
@@ -174,6 +206,8 @@ const BuiltinFunctionSpec BUILTIN_FUNCTIONS[] = {
     {"lerp", 3, 3, fn_lerp},
     {"between", 3, 3, fn_between},
     {"equal", 2, 3, fn_equal},
+    {"noise2d", 4, 4, fn_noise2d},
+    {"noise3d", 5, 5, fn_noise3d},
 };
 
 const size_t BUILTIN_FUNCTION_COUNT = sizeof(BUILTIN_FUNCTIONS) / sizeof(BuiltinFunctionSpec);

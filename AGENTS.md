@@ -1,51 +1,39 @@
-# Painter Project Guide for LLM Agents
+# Painter Agent Playbook
 
-## TL;DR
-- Domain-specific language (DSL) for declaratively generating Minecraft worlds.
-- Hybrid codebase: native C parser/executor (`engine/`) wrapped by Java (FFM/JExtract) in `core/`.
-- Build pipeline compiles the C engine with `clang`, generates Java bindings via `jextract`, and packages a shared library for tests/consumers.
-- Primary entrypoints: `engine/painter.c` (parser + interpreter) and generated Java bindings consumed by future JVM modules (e.g., `minestom`).
-- Tests live under `core/src/test`; use Gradle (`./gradlew :core:test`).
+## Lightning Overview
+- Painter is a Minecraft world generator DSL with a native C17 engine (`engine/`) wrapped by Java (`core/`) via Project Panama, plus a future Minestom module.
+- Primary parser + executor live in `engine/painter.c`/`.h`; runtime helpers in `painter_eval.c`, macros/functions/occurrences under `engine/builtin_*`.
+- Java bindings are generated with `jextract` and shipped alongside the compiled shared library that Gradle builds through `:core:compileJava`.
+- Tests are JUnit 5 (`core/src/test/java/net/minestom/painter/`); `ParserTest.java` covers parser/runtime behavior and must grow with every engine change.
 
-## Repo Layout
-- `engine/`: Hand-written C17 code implementing the tokenizer, parser, executor, macro system, and section/palette logic.
-  - `painter.c`/`painter.h`: AST definitions, parser, section generation routines, macro registry wiring.
-  - `tokenizer.c`/`tokenizer.h`: Lexer for the Painter DSL (numbers, identifiers, punctuation, brackets, etc.).
-  - `builtin_macros.c`/`.h`: Built-in macro implementations, currently `#sphere` (filled 3D spheres); extendable via the registry API.
-- `core/`: JVM module that wraps the native engine using Project Panama (FFM) bindings generated via `jextract`.
-  - `build.gradle.kts`: Drives native compilation (`clang`) and `jextract` generation; enables Java 25 preview features.
-  - `src/test/README.md`: Notes on JUnit tests for the native bindings; actual test sources go under `src/test/java/net/minestom/painter/`.
-- `minestom/`: Placeholder module for Minestom integration (currently empty sources).
-- `worlds/`: Sample `.paint` scripts demonstrating the DSL, e.g. `tour.paint`, `test_sphere.paint`.
-- `README.md`: User-facing overview of features and macro usage. References `MACRO_IMPLEMENTATION.md`; that file is not in the repo, so confirm requirements before relying on it.
+## Module Map for Agents
+- `engine/`
+  - `tokenizer.c`/`.h`: lexes Painter DSL (numbers, identifiers, delimiters).
+  - `painter.c`/`.h`: AST definitions, parser, section generation, macro registry.
+  - `painter_eval.c`/`.h`: interpreter and section/palette emission helpers.
+  - `builtin_functions.c`, `builtin_macros.c`, `builtin_occurrences.c` (+ headers): runtime primitives; extend by registering new entries in the respective tables.
+- `core/`
+  - `build.gradle.kts`: drives native build (`clang`) into `core/build/native/` and runs `jextract` into `core/build/generated/sources/jextract/java`.
+  - Generated bindings expose `PainterParser`/`PainterContext` wrappers used by tests and downstream JVM consumers.
+  - Tests reside under `core/src/test/java/net/minestom/painter/`; see `ParserTest.java` for end-to-end coverage patterns using the generated bindings.
+- `minestom/`
+  - Currently a placeholder Gradle module ready for future Minestom integration; no source files yet.
+- `worlds/`
+  - Sample `.paint` programs (e.g., `tour.paint`, `plain_forest.paint`) that exercise DSL features; handy for manual parser checks or new regression cases.
 
-## Language Highlights (Painter DSL)
-- Block placement: `[x z] block_name[properties]` or `[x y z]` (Y defaults to `0`).
-- Variables & expressions: standard arithmetic, identifier references, coordinate literals.
-- Loops: `for i in start..end { ... }`.
-- Occurrences: `@type(args) [condition] { ... }` for noise/structured repeats (see `worlds/tour.paint`).
-- Macros: `#macro .arg=value`; built-ins live in `engine/builtin_macros.c` and populate via `register_builtin_macros`.
+## Build & Test Flow
+- Core commands (run from repo root):
+  - `./gradlew :core:compileJava` → compiles the C engine with `clang`, generates FFM bindings, and publishes the shared library to test resources.
+  - `./gradlew :core:test` → runs JUnit suite with preview features and native access enabled.
+- When touching C headers or sources you **must**:
+  1. Add or extend coverage in `core/src/test/java/net/minestom/painter/ParserTest.java` to prove the new behavior.
+  2. Execute `./gradlew :core:test` and ensure it passes.
+  3. Regenerate bindings by re-running `:core:compileJava` if signatures changed.
+- For Java-only updates, rerun `:core:test`; Minestom module currently has no tests.
 
-## Build & Toolchain
-- Requirements: `clang` for native build, `jextract` on PATH for binding generation, Java 25 toolchain.
-- Key commands:
-  - `./gradlew :core:compileJava` (triggers native build + jextract).
-  - `./gradlew :core:test` (runs JUnit tests; sets working directory to repo root so the shared library resolves).
-  - `./gradlew clean` >> `cleanGenerated` to remove jextract output.
-- Native output written to `core/build/native/` (`libpainter.dylib` on macOS).
-- Generated Java sources land under `core/build/generated/sources/jextract/java` and are added to the `main` source set automatically.
-
-## Extending the Engine
-- Parser additions: edit `engine/painter.c` and adjust enums/structs in `engine/painter.h`.
-- Token changes: update `engine/tokenizer.*` to recognize new symbols/keywords.
-- New macros: implement in `engine/builtin_macros.c`, declare in `.h`, and append to `BUILTIN_MACROS` so they auto-register.
-- Memory management: every AST node allocation should be paired with cleanup in `instruction_free`, `expression_free`, etc.
-- After native changes, rerun `./gradlew :core:compileJava` or `:core:test` to rebuild the shared library and regenerate bindings.
-
-## Working Tips for Agents
-- Prefer `rg` for code search (configured in this environment).
-- When touching native code, ensure the shared library still builds (run `./gradlew :core:compileJava`).
-- For Java-side tests, follow the cleanup pattern noted in `core/src/test/README.md` (`PainterParser.freeProgram`).
-- If adding new DSL samples, keep them in `worlds/` and update `README.md` accordingly.
-- `minestom/` currently lacks sources; coordinate with maintainers before assuming runtime integration.
-
+## Practical Tips
+- Prefer `rg` for repo search; Gradle already handles include paths (`-I engine`), so no manual flag juggling.
+- Use `PainterParser.freeProgram`/`PainterParser.freeContext` in tests to mirror existing memory management discipline.
+- Pair every new AST allocation in C with cleanup in `instruction_free`/`expression_free` in `painter.c`.
+- Keep new DSL examples in `worlds/` and update `README.md` only if user-facing behavior changes.
+- The repo ships with fast-noise headers (`engine/FastNoiseLite.h`); include it directly when adding new noise-powered features.

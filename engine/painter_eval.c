@@ -203,6 +203,12 @@ static void run_instruction_list(const InstructionList *list, ExecutionState *st
 static void occurrence_runtime_run_body(void *userdata, const InstructionList *body, int anchor_x, int anchor_y, int anchor_z) {
   ExecutionState *state = (ExecutionState *)userdata;
   if (!state || !body) return;
+  
+  // Inject x, y, z variables so they can be used in expressions like noise2d(x, z, ...)
+  context_set(state->variables, "x", (double)anchor_x);
+  context_set(state->variables, "y", (double)anchor_y);
+  context_set(state->variables, "z", (double)anchor_z);
+  
   run_instruction_list(body, state, anchor_x, anchor_y, anchor_z);
 }
 

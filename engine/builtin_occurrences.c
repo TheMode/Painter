@@ -156,6 +156,9 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
   const int base_y = eval_int_or(base_y_expr, state, 0);
   const int dimensions = eval_int_or(dimensions_expr, state, 2);
 
+  // Check if base_y was explicitly provided
+  const bool has_base_y = base_y_expr != NULL;
+
   // Initialize noise
   fnl_state noise = fnlCreateState();
   noise.seed = seed;
@@ -178,9 +181,11 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
     void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
     void *userdata = runtime->userdata;
 
+    // If .base_y is explicitly set, use it as absolute anchor
+    // Otherwise use origin_y (section-relative)
     const int origin_offset_y = origin_y;
     const int amplitude_base_y = base_y + origin_y;
-    const int base_anchor_y = apply_amplitude ? amplitude_base_y : origin_offset_y;
+    const int base_anchor_y = has_base_y ? base_y : (apply_amplitude ? amplitude_base_y : origin_offset_y);
 
     for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
       for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
