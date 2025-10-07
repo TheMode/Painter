@@ -1,5 +1,7 @@
-package net.minestom.paint;
+package net.minestom.paint.demo;
 
+import net.minestom.paint.GeneratorReloader;
+import net.minestom.paint.PaintUrlLoader;
 import net.minestom.server.command.builder.Command;
 import net.minestom.server.command.builder.arguments.ArgumentType;
 import net.minestom.server.command.builder.arguments.ArgumentWord;
@@ -18,11 +20,11 @@ import static net.kyori.adventure.text.format.NamedTextColor.*;
 
 @NotNullByDefault
 public final class PainterCommand extends Command {
-    public PainterCommand(InstanceContainer instance, Path path) {
+    public PainterCommand(InstanceContainer instance, Path path, PainterExperience experience) {
         super("painter");
         addSubcommands(
-                new Load(instance),
-                new Reload(instance, path)
+                new Load(instance, experience),
+                new Reload(instance, path, experience)
         );
     }
 
@@ -39,8 +41,11 @@ public final class PainterCommand extends Command {
     private static final class Load extends Command {
         private static final Logger LOGGER = LoggerFactory.getLogger(Load.class);
 
-        public Load(InstanceContainer instance) {
+        private final PainterExperience experience;
+
+        public Load(InstanceContainer instance, PainterExperience experience) {
             super("load");
+            this.experience = experience;
 
             PaintUrlLoader urlLoader = new PaintUrlLoader();
 
@@ -49,6 +54,7 @@ public final class PainterCommand extends Command {
             addSyntax((sender, context) -> {
                 final String url = context.get(urlArg);
                 sender.sendMessage(text("Loading painter code from: " + url, YELLOW));
+                experience.notifyReloadStarted("URL: " + url);
 
                 // Load asynchronously to avoid blocking the server
                 CompletableFuture.runAsync(() -> {
@@ -64,6 +70,7 @@ public final class PainterCommand extends Command {
 
                         // Reload the generator and regenerate all chunks
                         GeneratorReloader.reload(instance, content, "URL: " + url);
+                        experience.notifyReloadSuccess("URL: " + url);
 
                         sender.sendMessage(text("✓ World generator loaded successfully!", GREEN));
                         sender.sendMessage(text("Source: " + url, GRAY));
@@ -75,16 +82,18 @@ public final class PainterCommand extends Command {
                         Thread.currentThread().interrupt();
                         LOGGER.error("Interrupted while loading from URL", e);
                         sender.sendMessage(text("✗ Request interrupted", RED));
+                        experience.notifyReloadFailure("URL: " + url, "interrupted");
                     } catch (Exception e) {
                         LOGGER.error("Failed to load from URL: {}", url, e);
                         sender.sendMessage(text("✗ Failed to load: " + e.getMessage(), RED));
+                        experience.notifyReloadFailure("URL: " + url, e.getMessage());
                     }
                 });
             }, urlArg);
 
             setDefaultExecutor((sender, context) -> {
-                sender.sendMessage(text("Usage: /loadpaint <url>", RED));
-                sender.sendMessage(text("Example: /loadpaint pastebin.com/ABC123", GRAY));
+                sender.sendMessage(text("Usage: /painter load <url>", RED));
+                sender.sendMessage(text("Example: /painter load pastebin.com/ABC123", GRAY));
                 sender.sendMessage(text("Supported: Pastebin, GitHub Gist, raw URLs", GRAY));
             });
         }
@@ -100,11 +109,15 @@ public final class PainterCommand extends Command {
     public static final class Reload extends Command {
         private static final Logger LOGGER = LoggerFactory.getLogger(Reload.class);
 
-        public Reload(InstanceContainer instance, Path paintFile) {
+        private final PainterExperience experience;
+
+        public Reload(InstanceContainer instance, Path paintFile, PainterExperience experience) {
             super("reload");
+            this.experience = experience;
 
             setDefaultExecutor((sender, context) -> {
                 sender.sendMessage(text("Reloading world generator from file...", YELLOW));
+                experience.notifyReloadStarted(paintFile.toString());
 
                 try {
                     final String content = Files.readString(paintFile);
@@ -117,6 +130,7 @@ public final class PainterCommand extends Command {
                     }
 
                     GeneratorReloader.reload(instance, content, paintFile.toString());
+                    experience.notifyReloadSuccess(paintFile.toString());
 
                     sender.sendMessage(text("✓ World generator reloaded successfully!", GREEN));
                     sender.sendMessage(text("✓ All " + chunkCount + " chunks regenerated!", GREEN));
@@ -126,9 +140,11 @@ public final class PainterCommand extends Command {
                 } catch (IOException e) {
                     LOGGER.error("Failed to read paint file", e);
                     sender.sendMessage(text("✗ Failed to read file: " + e.getMessage(), RED));
+                    experience.notifyReloadFailure(paintFile.toString(), e.getMessage());
                 } catch (Exception e) {
                     LOGGER.error("Failed to reload generator", e);
                     sender.sendMessage(text("✗ Failed to reload: " + e.getMessage(), RED));
+                    experience.notifyReloadFailure(paintFile.toString(), e.getMessage());
                 }
             });
         }
