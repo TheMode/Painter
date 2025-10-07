@@ -6,7 +6,9 @@ import net.minestom.paint.GeneratorReloader;
 import net.minestom.paint.PaintFileWatcher;
 import net.minestom.paint.PaintGenerator;
 import net.minestom.server.MinecraftServer;
+import net.minestom.server.ServerFlag;
 import net.minestom.server.command.CommandManager;
+import net.minestom.server.coordinate.ChunkRange;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.entity.GameMode;
 import net.minestom.server.entity.Player;
@@ -17,6 +19,7 @@ import net.minestom.server.event.player.PlayerSpawnEvent;
 import net.minestom.server.event.server.ServerListPingEvent;
 import net.minestom.server.extras.lan.OpenToLAN;
 import net.minestom.server.extras.lan.OpenToLANConfig;
+import net.minestom.server.instance.Chunk;
 import net.minestom.server.instance.InstanceContainer;
 import net.minestom.server.instance.InstanceManager;
 import net.minestom.server.instance.LightingChunk;
@@ -29,6 +32,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static net.kyori.adventure.text.Component.text;
 
@@ -38,6 +44,7 @@ public final class Demo {
             .append(PainterBranding.gradientWord("Painter"))
             .append(text(" showcase", NamedTextColor.GRAY))
             .build();
+    private static final Pos SPAWN_POS = new Pos(0, 100, 0);
 
     private Demo() {
     }
@@ -94,6 +101,15 @@ public final class Demo {
         LOGGER.info("Initial generator loaded from {}", paintFile);
         experience.initialize();
         experience.notifyReloadSuccess("initial program");
+
+        final int chunkCount = ChunkRange.chunksCount(ServerFlag.CHUNK_VIEW_DISTANCE);
+        LOGGER.info("Pre-loading {} chunks around spawn (this may take a while)", chunkCount);
+        List<CompletableFuture<Chunk>> futures = new ArrayList<>();
+        ChunkRange.chunksInRange(SPAWN_POS, ServerFlag.CHUNK_VIEW_DISTANCE, (chunkX, chunkZ) -> {
+            futures.add(instance.loadChunk(chunkX, chunkZ));
+        });
+        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+        LOGGER.info("Pre-loaded {} chunks around spawn", futures.size());
     }
 
     private static PaintFileWatcher setupFileWatcher(InstanceContainer instance, DemoConfig config, PainterExperience experience) {
@@ -145,7 +161,7 @@ public final class Demo {
         events.addListener(AsyncPlayerConfigurationEvent.class, event -> {
             Player player = event.getPlayer();
             event.setSpawningInstance(instance);
-            player.setRespawnPoint(new Pos(0, 100, 0));
+            player.setRespawnPoint(SPAWN_POS);
             player.setGameMode(GameMode.CREATIVE);
         });
         events.addListener(PlayerSpawnEvent.class, event -> {
