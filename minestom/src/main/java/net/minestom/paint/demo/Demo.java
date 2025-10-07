@@ -2,7 +2,9 @@ package net.minestom.paint.demo;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.minestom.paint.*;
+import net.minestom.paint.GeneratorReloader;
+import net.minestom.paint.PaintFileWatcher;
+import net.minestom.paint.PaintGenerator;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.command.CommandManager;
 import net.minestom.server.coordinate.Pos;
@@ -40,7 +42,7 @@ public final class Demo {
     private Demo() {
     }
 
-    public static void main(String[] args) throws IOException {
+    static void main(String[] args) throws IOException {
         MinecraftServer server = MinecraftServer.init();
         DemoConfig config = loadConfig();
 
@@ -66,7 +68,7 @@ public final class Demo {
     }
 
     private static DemoConfig loadConfig() {
-        Path program = Path.of(System.getProperty("painter.program", "worlds/tour.paint"));
+        Path program = Path.of(System.getProperty("painter.program", "worlds/plain_forest.paint"));
         boolean fileWatcher = Boolean.parseBoolean(System.getProperty("painter.enableFileWatcher", "true"));
         boolean loadCommands = Boolean.parseBoolean(System.getProperty("painter.enableLoadCommands", "true"));
         String bindAddress = System.getProperty("painter.bindAddress", "0.0.0.0");
@@ -124,7 +126,10 @@ public final class Demo {
             return;
         }
         CommandManager commands = MinecraftServer.getCommandManager();
-        commands.register(new PainterCommand(instance, config.paintFile(), experience));
+        commands.register(
+                new PainterCommand(instance, config.paintFile(), experience),
+                new TeleportCommand()
+        );
         LOGGER.info("Commands registered: /painter reload, /painter load <url>");
     }
 

@@ -1,0 +1,20 @@
+// Plains biome sample: layered ground plus sparse oak trees.
+
+ground_height = 64
+
+// Generate rolling terrain using noise; columns fill stone/dirt while the top block is grass.
+@noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+  #column .y=-6 .height=4 .block=stone
+  #column .y=-2 .height=2 .block=dirt
+  [0 0 0] grass_block
+}
+
+// Use a second pass with the same height sampling so trees sit on the generated grass.
+@noise .frequency=0.05 .seed=31415 .threshold=0.95 .amplitude=2 .base_y=ground_height {
+  #column .y=1 .height=3 .block=oak_log
+  [-1 4 0] oak_leaves
+  [1 4 0] oak_leaves
+  [0 4 -1] oak_leaves
+  [0 4 1] oak_leaves
+  [0 5 0] oak_leaves
+}

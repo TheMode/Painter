@@ -73,17 +73,9 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
     return;
   }
 
-  const Expression *step_x_expr = named_arg_get(args, "x");
-  const Expression *step_y_expr = named_arg_get(args, "y");
-  const Expression *step_z_expr = named_arg_get(args, "z");
-
-  if (!step_x_expr || !step_y_expr || !step_z_expr) {
-    return;
-  }
-
-  const int step_x = eval_int_or(step_x_expr, state, 0);
-  const int step_y = eval_int_or(step_y_expr, state, 0);
-  const int step_z = eval_int_or(step_z_expr, state, 0);
+  const int step_x = eval_int_or(named_arg_get(args, "x"), state, 0);
+  const int step_y = eval_int_or(named_arg_get(args, "y"), state, 0);
+  const int step_z = eval_int_or(named_arg_get(args, "z"), state, 0);
 
   const int SEARCH_MARGIN = 16;
   const int base_x = runtime->base_x;

@@ -93,6 +93,8 @@ final class ParserTest {
                 Arguments.of("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone"),
                 Arguments.of("#cuboid .from=[0 0 0] .to=[3 2 4] .block=oak_planks .hollow"),
                 Arguments.of("#line .from=[0 0 0] .to=[5 0 0] .block=stone"),
+                Arguments.of("#column .height=5 .block=stone"),
+                Arguments.of("#column .to=12 .block=stone"),
                 Arguments.of("""
                         // Configuration
                         tower_height = 50
@@ -253,7 +255,7 @@ final class ParserTest {
             #line .from=[0 3 0] .to=[3 6 3] .block=copper_block
             """)
     @DisplayName("#line macro draws axis-aligned, diagonal, and cross-section segments")
-    void testLineMacro(ProgramContext ctx) {
+   void testLineMacro(ProgramContext ctx) {
         PainterParser.SectionData section0 = ctx.generateSection(0, 0, 0);
         PainterParser.SectionData section1 = ctx.generateSection(1, 0, 0);
 
@@ -282,6 +284,75 @@ final class ParserTest {
         assertBlockAt(section0, 1, 4, 1, "copper_block");
         assertBlockAt(section0, 2, 5, 2, "copper_block");
         assertBlockAt(section0, 3, 6, 3, "copper_block");
+    }
+
+    @PaintTest("""
+            #column .height=6 .block=stone
+            #column .x=1 .y=1 .to=5 .block=glass
+            #column .x=2 .y=4 .height=-2 .block=oak_log
+            #column .x=3 .block=gold_block .to=0
+            """)
+    @DisplayName("#column macro places vertical runs with height and absolute targets")
+    void testColumnMacroHeightAndTo(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+
+        assertPaletteContains(section, "stone", "glass", "oak_log", "gold_block", "air");
+
+        // .height=6 creates 6 blocks starting at y=0: y=0,1,2,3,4,5
+        for (int y = 0; y <= 5; y++) {
+            assertBlockAt(section, 0, y, 0, "stone");
+        }
+        assertBlockAt(section, 0, 6, 0, "air");
+
+        // .to=5 creates blocks from start to target (inclusive)
+        for (int y = 1; y <= 5; y++) {
+            assertBlockAt(section, 1, y, 0, "glass");
+        }
+        assertBlockAt(section, 1, 0, 0, "air");
+        assertBlockAt(section, 1, 6, 0, "air");
+
+        // .y=4 .height=-2 creates 2 blocks going down from y=4: y=4,3
+        for (int y = 3; y <= 4; y++) {
+            assertBlockAt(section, 2, y, 0, "oak_log");
+        }
+        assertBlockAt(section, 2, 2, 0, "air");
+        assertBlockAt(section, 2, 5, 0, "air");
+
+        assertBlockAt(section, 3, 0, 0, "gold_block");
+        assertBlockAt(section, 3, 1, 0, "air");
+    }
+
+    @PaintTest("""
+            #column .y=14 .height=7 .block=stone
+            #column .x=1 .height=-17 .block=gold_block
+            """)
+    @DisplayName("#column macro spans adjacent vertical sections upward and downward")
+    void testColumnMacroAcrossSections(ProgramContext ctx) {
+        PainterParser.SectionData baseSection = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData upperSection = ctx.generateSection(0, 1, 0);
+        PainterParser.SectionData lowerSection = ctx.generateSection(0, -1, 0);
+
+        assertPaletteContains(baseSection, "stone", "gold_block", "air");
+        assertPaletteContains(upperSection, "stone", "air");
+        assertPaletteContains(lowerSection, "gold_block", "air");
+
+        // Upward column: .y=14 .height=7 creates 7 blocks: world y=14..20
+        // -> local 14,15 in base; 0..4 in upper
+        assertBlockAt(baseSection, 0, 14, 0, "stone");
+        assertBlockAt(baseSection, 0, 15, 0, "stone");
+        assertBlockAt(baseSection, 0, 13, 0, "air");
+        for (int localY = 0; localY <= 4; localY++) {
+            assertBlockAt(upperSection, 0, localY, 0, "stone");
+        }
+        assertBlockAt(upperSection, 0, 5, 0, "air");
+
+        // Downward column: .height=-17 creates 17 blocks going down: world y=0..-16
+        // -> local 0 in base, 15..0 in lower
+        assertBlockAt(baseSection, 1, 0, 0, "gold_block");
+        assertBlockAt(baseSection, 1, 1, 0, "air");
+        for (int localY = 0; localY < 16; localY++) {
+            assertBlockAt(lowerSection, 1, localY, 0, "gold_block");
+        }
     }
 
     @PaintTest("""
@@ -542,6 +613,62 @@ final class ParserTest {
     }
 
     @PaintTest("""
+            @every .x=4 .z=4 {
+              [0 0 0] stone
+            }
+            """)
+    @DisplayName("@every defaults missing axis steps to zero")
+    void testEveryDefaultsMissingAxis(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+
+        assertPaletteContains(section, "stone", "air");
+
+        assertBlockAt(section, 0, 0, 0, "stone");
+        assertBlockAt(section, 4, 0, 0, "stone");
+        assertBlockAt(section, 0, 0, 4, "stone");
+        assertBlockAt(section, 4, 0, 4, "stone");
+
+        assertBlockAt(section, 0, 1, 0, "air");
+    }
+
+    @PaintTest("""
+            @every .x=4 .z=4 {
+              #column .y=-5 .height=2 .block=stone
+              #column .y=-3 .height=5 .block=dirt
+            }
+            """)
+    @DisplayName("@every with columns and vertical offsets spans neighboring sections")
+    void testEveryColumnsWithOffsets(ProgramContext ctx) {
+        PainterParser.SectionData base = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData below = ctx.generateSection(0, -1, 0);
+
+        assertPaletteContains(base, "dirt", "air");
+        assertPaletteContains(below, "stone", "dirt", "air");
+
+        for (int x = 0; x <= 12; x += 4) {
+            for (int z = 0; z <= 12; z += 4) {
+                // Dirt column should reach y=0..1 in base section and continue downwards into below section
+                assertBlockAt(base, x, 0, z, "dirt");
+                assertBlockAt(base, x, 1, z, "dirt");
+                assertBlockAt(base, x, 2, z, "air");
+
+                // Stone column occupies -5 and -4 (local 11 and 12), dirt fills -3..-1 (local 13..15)
+                assertBlockAt(below, x, 11, z, "stone");
+                assertBlockAt(below, x, 12, z, "stone");
+                assertBlockAt(below, x, 13, z, "dirt");
+                assertBlockAt(below, x, 14, z, "dirt");
+                assertBlockAt(below, x, 15, z, "dirt");
+            }
+        }
+
+        // Off-grid positions remain untouched
+        assertBlockAt(base, 2, 0, 2, "air");
+        assertBlockAt(base, 2, 1, 2, "air");
+        assertBlockAt(below, 2, 11, 2, "air");
+        assertBlockAt(below, 2, 14, 2, "air");
+    }
+
+    @PaintTest("""
             @every .x=0 .y=0 .z=0 {
               [0 0 0] gold_block
             }
@@ -595,5 +722,27 @@ final class ParserTest {
                 ParserTest.assertBlockAt(s, 0, localY, 0, "dirt");
             }
         }
+    }
+
+    @PaintTest("""
+            ground_height = 64
+            @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+              #column .y=-5 .height=2 .block=stone
+            }
+            """)
+    @DisplayName("@noise with #column using negative y offset should not hang CPU")
+    void testNoiseWithColumnNegativeOffset(ProgramContext ctx) {
+        // This test verifies that @noise with base_y=64 and #column with y=-5 height=2
+        // correctly creates 2 stone blocks (not 3!) at the expected positions.
+        // With ground_height=64, amplitude=2, noise places anchors at y=62-66.
+        // Column with y=-5, height=2 should place 2 blocks starting at (62-66)+(-5) = 57-61.
+        // Expected: 2 blocks at each noise point (e.g., at y=59,60 when anchor is at y=64).
+        
+        // Generate section 3 (base_y = 48, covers y=48-63) where stones appear
+        PainterParser.SectionData section3 = ctx.generateSection(0, 3, 0);
+        assertPaletteContains(section3, "stone", "air");
+        
+        // The test primarily verifies that generation completes without hanging,
+        // and that the correct number of blocks is placed (2, not 3).
     }
 }

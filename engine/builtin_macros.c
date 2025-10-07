@@ -368,10 +368,104 @@ void builtin_macro_line(ExecutionState *state, const NamedArgumentList *args) {
   draw_line(state, start_x, start_y, start_z, end_x, end_y, end_z, palette_index);
 }
 
+// Column macro: #column .block=<block_name> (.to=<absolute_y> | .height=<count>) [.x=<dx>] [.y=<dy>] [.z=<dz>]
+// .height specifies the NUMBER of blocks to place, not the delta
+// For example: .height=2 places 2 blocks (at y and y+1), not 3 blocks (y, y+1, y+2)
+void builtin_macro_column(ExecutionState *state, const NamedArgumentList *args) {
+  if (!state) return;
+
+  Expression *block_expr = named_arg_get(args, "block");
+  if (!block_expr) {
+    return;
+  }
+
+  const int palette_index = add_block_to_palette(state, block_expr);
+  if (palette_index < 0) {
+    return;
+  }
+
+  const int start_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
+  const int start_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
+  const int start_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+
+  const Expression *to_expr = named_arg_get(args, "to");
+  const Expression *height_expr = named_arg_get(args, "height");
+
+  if (!to_expr && !height_expr) {
+    return;
+  }
+
+  int target_y = start_y;
+  if (to_expr) {
+    const double target_value = painter_evaluate_expression(to_expr, state);
+    if (!isfinite(target_value)) {
+      return;
+    }
+    target_y = (int)llround(target_value);
+  } else {
+    // .height specifies the NUMBER of blocks, so target is start + height - 1
+    const double height_value = painter_evaluate_expression(height_expr, state);
+    if (!isfinite(height_value)) {
+      return;
+    }
+    const int height_blocks = (int)llround(height_value);
+    if (height_blocks == 0) {
+      return; // No blocks to place
+    }
+    // For positive height, target is start + height - 1
+    // For negative height, target is start + height + 1
+    target_y = start_y + height_blocks + (height_blocks > 0 ? -1 : 1);
+  }
+
+  PainterAABB bounds = {
+      .min_x = start_x,
+      .max_x = start_x,
+      .min_y = start_y < target_y ? start_y : target_y,
+      .max_y = start_y > target_y ? start_y : target_y,
+      .min_z = start_z,
+      .max_z = start_z,
+  };
+
+  if (!painter_section_clip_aabb(state, &bounds)) {
+    return;
+  }
+
+  const int step = (target_y >= start_y) ? 1 : -1;
+  int first_y;
+  int last_y;
+  if (step > 0) {
+    first_y = start_y < bounds.min_y ? bounds.min_y : start_y;
+    last_y = target_y > bounds.max_y ? bounds.max_y : target_y;
+    if (first_y > last_y) {
+      return;
+    }
+  } else {
+    first_y = start_y > bounds.max_y ? bounds.max_y : start_y;
+    last_y = target_y < bounds.min_y ? bounds.min_y : target_y;
+    if (first_y < last_y) {
+      return;
+    }
+  }
+
+  const int local_x = world_to_local(start_x, state->base_x);
+  const int local_z = world_to_local(start_z, state->base_z);
+
+  int local_y = world_to_local(first_y, state->base_y);
+  int index = local_y * 256 + local_z * 16 + local_x;
+  const int stride = step * 256;
+  const int iterations = (step > 0) ? (last_y - first_y + 1) : (first_y - last_y + 1);
+
+  for (int i = 0; i < iterations; ++i) {
+    state->block_indices[index] = palette_index;
+    index += stride;
+  }
+}
+
 const BuiltinMacro BUILTIN_MACROS[] = {
     {"sphere", builtin_macro_sphere},
     {"cuboid", builtin_macro_cuboid},
     {"line", builtin_macro_line},
+    {"column", builtin_macro_column},
 };
 
 const int BUILTIN_MACROS_COUNT = sizeof(BUILTIN_MACROS) / sizeof(BuiltinMacro);
