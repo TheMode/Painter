@@ -127,7 +127,7 @@ Place blocks once per section (16x16x16) at a specific offset within the section
 General-purpose noise-based placement using FastNoiseLite. This single occurrence type can handle terrain generation, tree placement, and sparse feature distribution.
 
 ```painter
-@noise(frequency, seed, [threshold], [amplitude], [base_y]) {
+@noise(frequency, seed, [threshold], [amplitude], [base_y], [dimensions]) {
   // Blocks to place
 }
 ```
@@ -141,6 +141,7 @@ General-purpose noise-based placement using FastNoiseLite. This single occurrenc
   - Use to control sparsity: 0.7 = 30% coverage, 0.9 = 10% coverage
 - `amplitude` - Optional. Multiplies noise and adds to Y coordinate for terrain height
 - `base_y` - Optional. Base Y level when using amplitude (default 0)
+- `dimensions` - Optional. Defaults to 2; set to 3 to sample full 3D volume
 
 **Usage Patterns:**
 
@@ -174,6 +175,15 @@ Use threshold only (no amplitude) for flat sparse placement:
 // Flowers on 10% of area at y=64
 @noise(0.1, 12345, 0.9) {
   [0 64 0] dandelion
+}
+```
+
+#### Volumetric Scattering
+Sample 3D noise for floating clusters or cave features:
+```painter
+// Glowstone spheres scattered through a 3D volume
+@noise(0.08, 424242, 0.95, 0, 0, 3) {
+  #sphere .radius=2 .block=glowstone
 }
 ```
 
