@@ -374,6 +374,20 @@ final class ParserTest {
     }
 
     @PaintTest("""
+            [0 0 0] minecraft:oak_log[axis=y]
+            [1 0 0] minecraft:oak_log[axis=y]
+            """)
+    @DisplayName("Block placements reuse cached identifiers with properties")
+    void blockPlacementsReuseFormattedIdentifier(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+
+        assertPaletteContains(section, "minecraft:oak_log[axis=y]", "air");
+        assertEquals(2, section.palette().length, "Expect only cached block and air in palette");
+        assertBlockAt(section, 0, 0, 0, "minecraft:oak_log[axis=y]");
+        assertBlockAt(section, 1, 0, 0, "minecraft:oak_log[axis=y]");
+    }
+
+    @PaintTest("""
             x = 5
             
             if(x < 3) {
@@ -1227,6 +1241,5 @@ final class ParserTest {
         }
     }
 }
-
 
 

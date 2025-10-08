@@ -696,6 +696,12 @@ static BlockPlacement parse_block_placement(Parser *parser) {
     }
   }
 
+  painter_format_block(
+      placement.block_identifier,
+      sizeof(placement.block_identifier),
+      placement.block_name,
+      placement.block_properties);
+
   return placement;
 }
 

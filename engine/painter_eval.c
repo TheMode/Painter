@@ -285,22 +285,33 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
       break;
     }
 
-    if (!painter_section_contains_point(state, world_x, world_y, world_z)) {
+    int local_x = world_x - state->base_x;
+    if ((unsigned)local_x >= 16u) {
       break;
     }
 
-    int local_x = world_x - state->base_x;
     int local_y = world_y - state->base_y;
-    int local_z = world_z - state->base_z;
-    int block_index = local_y * 256 + local_z * 16 + local_x;
+    if ((unsigned)local_y >= 16u) {
+      break;
+    }
 
-    char block_string[MAX_TOKEN_VALUE_LENGTH * 2];
-    painter_format_block(block_string, sizeof(block_string), instr->block_placement.block_name, instr->block_placement.block_properties);
+    int local_z = world_z - state->base_z;
+    if ((unsigned)local_z >= 16u) {
+      break;
+    }
+
+    const char *block_string = instr->block_placement.block_identifier;
+    if (!block_string[0]) {
+      break;
+    }
 
     int palette_index = painter_palette_get_or_add(state, block_string);
-    if (palette_index >= 0) {
-      state->block_indices[block_index] = palette_index;
+    if (palette_index < 0) {
+      break;
     }
+
+    int block_index = (local_y << 8) | (local_z << 4) | local_x;
+    state->block_indices[block_index] = palette_index;
     break;
   }
 
@@ -516,19 +527,24 @@ int painter_palette_get_or_add(ExecutionState *state, const char *block_string) 
     return -1;
   }
 
-  for (int i = 0; i < *state->palette_size; i++) {
-    if (strcmp((*state->palette)[i], block_string) == 0) {
+  char **palette = *state->palette;
+  int size = *state->palette_size;
+
+  for (int i = 0; i < size; i++) {
+    if (strcmp(palette[i], block_string) == 0) {
       return i;
     }
   }
 
-  if (*state->palette_capacity <= *state->palette_size) {
-    int new_capacity = (*state->palette_capacity == 0) ? 8 : (*state->palette_capacity * 2);
-    char **resized = realloc(*state->palette, sizeof(char *) * new_capacity);
+  int capacity = *state->palette_capacity;
+  if (capacity <= size) {
+    int new_capacity = capacity == 0 ? 8 : capacity * 2;
+    char **resized = realloc(palette, sizeof(char *) * new_capacity);
     if (!resized) {
       return -1;
     }
-    *state->palette = resized;
+    palette = resized;
+    *state->palette = palette;
     *state->palette_capacity = new_capacity;
   }
 
@@ -538,8 +554,9 @@ int painter_palette_get_or_add(ExecutionState *state, const char *block_string) 
   }
   strcpy(copy, block_string);
 
-  (*state->palette)[*state->palette_size] = copy;
-  return (*state->palette_size)++;
+  palette[size] = copy;
+  *state->palette_size = size + 1;
+  return size;
 }
 
 // Helper function to create a full block string (name + properties)

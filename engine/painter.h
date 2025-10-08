@@ -125,6 +125,7 @@ typedef struct BlockPlacement {
   Expression *coordinate;
   char block_name[MAX_TOKEN_VALUE_LENGTH];
   char block_properties[MAX_TOKEN_VALUE_LENGTH];
+  char block_identifier[MAX_TOKEN_VALUE_LENGTH * 2];
 } BlockPlacement;
 
 // Variable assignment: name = expression
