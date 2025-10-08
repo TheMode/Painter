@@ -69,7 +69,7 @@ static int eval_int_or(const Expression *expr, ExecutionState *state, int fallba
 
 static void occurrence_every(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y,
     int origin_z, OccurrenceRuntime *runtime) {
-  if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
+  if (!runtime || !body || body->count == 0 || !args) {
     return;
   }
 
@@ -104,14 +104,15 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
   }
 
   void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
+  if (!run_body) {
+    return;
+  }
   void *userdata = runtime->userdata;
 
-  for (int kx = kx_start; kx <= kx_end; ++kx) {
-    const int anchor_world_x = step_x * kx;
-    for (int ky = ky_start; ky <= ky_end; ++ky) {
-      const int anchor_world_y = step_y * ky;
-      for (int kz = kz_start; kz <= kz_end; ++kz) {
-        const int anchor_world_z = step_z * kz;
+  for (int kx = kx_start, anchor_world_x = step_x * kx_start; kx <= kx_end; ++kx, anchor_world_x += step_x) {
+    for (int ky = ky_start, anchor_world_y = step_y * ky_start; ky <= ky_end; ++ky, anchor_world_y += step_y) {
+      int anchor_world_z = step_z * kz_start;
+      for (int kz = kz_start; kz <= kz_end; ++kz, anchor_world_z += step_z) {
         run_body(userdata, body, anchor_world_x, anchor_world_y, anchor_world_z);
       }
     }
@@ -136,6 +137,8 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
   if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
     return;
   }
+  void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
+  void *userdata = runtime->userdata;
 
   // Get named arguments
   const Expression *frequency_expr = named_arg_get(args, "frequency");
@@ -153,11 +156,14 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
   const int seed = eval_int_or(seed_expr, state, 0);
   const float threshold = (float)eval_double_or(threshold_expr, state, -1.0);
   const float amplitude = (float)eval_double_or(amplitude_expr, state, 0.0);
-  const int base_y = eval_int_or(base_y_expr, state, 0);
+  const int base_y_arg = eval_int_or(base_y_expr, state, 0);
   const int dimensions = eval_int_or(dimensions_expr, state, 2);
 
   // Check if base_y was explicitly provided
   const bool has_base_y = base_y_expr != NULL;
+  const bool use_threshold = threshold_expr && threshold >= 0.0f;
+  const float threshold_cutoff = (threshold * 2.0f) - 1.0f;
+  const bool use_amplitude = amplitude_expr && amplitude != 0.0f;
 
   // Initialize noise
   fnl_state noise = fnlCreateState();
@@ -176,61 +182,45 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
     const int range_max_z = base_z + 15 + SEARCH_MARGIN;
 
     // Sample noise for each XZ coordinate
-    const bool apply_threshold = threshold >= 0.0f;
-    const bool apply_amplitude = amplitude != 0.0f;
-    void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
-    void *userdata = runtime->userdata;
-
-    // If .base_y is explicitly set, use it as absolute anchor
-    // Otherwise use origin_y (section-relative)
-    const int origin_offset_y = origin_y;
-    const int amplitude_base_y = base_y + origin_y;
-    const int base_anchor_y = has_base_y ? base_y : (apply_amplitude ? amplitude_base_y : origin_offset_y);
+    const int base_anchor_y = has_base_y ? base_y_arg : origin_y;
 
     for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
       for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
         const float noise_value = fnlGetNoise2D(&noise, (float)anchor_x, (float)anchor_z);
 
-        if (apply_threshold) {
-          const float normalized_noise = (noise_value + 1.0f) * 0.5f;
-          if (normalized_noise < threshold) {
-            continue;
-          }
+        if (use_threshold && noise_value < threshold_cutoff) {
+          continue;
         }
 
-        const int height_offset = apply_amplitude ? (int)lroundf(noise_value * amplitude) : 0;
-        run_body(userdata, body, anchor_x, base_anchor_y + height_offset, anchor_z);
+        int anchor_y = base_anchor_y;
+        if (use_amplitude) {
+          anchor_y += (int)lroundf(noise_value * amplitude);
+        }
+
+        run_body(userdata, body, anchor_x, anchor_y, anchor_z);
       }
     }
     return;
   }
 
   if (dimensions == 3) {
-    const int base_y = runtime->base_y;
+    const int runtime_base_y = runtime->base_y;
     const int base_z = runtime->base_z;
 
     const int range_min_x = base_x - SEARCH_MARGIN;
     const int range_max_x = base_x + 15 + SEARCH_MARGIN;
-    const int range_min_y = base_y - SEARCH_MARGIN;
-    const int range_max_y = base_y + 15 + SEARCH_MARGIN;
+    const int range_min_y = runtime_base_y - SEARCH_MARGIN;
+    const int range_max_y = runtime_base_y + 15 + SEARCH_MARGIN;
     const int range_min_z = base_z - SEARCH_MARGIN;
     const int range_max_z = base_z + 15 + SEARCH_MARGIN;
-
-    const bool apply_threshold = threshold >= 0.0f;
-
-    void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
-    void *userdata = runtime->userdata;
 
     for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
       for (int y = range_min_y, anchor_y = y + origin_y; y <= range_max_y; ++y, ++anchor_y) {
         for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
           const float noise_value = fnlGetNoise3D(&noise, (float)anchor_x, (float)anchor_y, (float)anchor_z);
 
-          if (apply_threshold) {
-            const float normalized_noise = (noise_value + 1.0f) * 0.5f;
-            if (normalized_noise < threshold) {
-              continue;
-            }
+          if (use_threshold && noise_value < threshold_cutoff) {
+            continue;
           }
 
           run_body(userdata, body, anchor_x, anchor_y, anchor_z);
@@ -247,7 +237,7 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
 // Sections are 16x16x16 blocks
 static void occurrence_section(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x,
     int origin_y, int origin_z, OccurrenceRuntime *runtime) {
-  if (!runtime || !runtime->run_body || !body || body->count == 0) {
+  if (!runtime || !body || body->count == 0) {
     return;
   }
 
