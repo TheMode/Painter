@@ -1,11 +1,23 @@
 // Plains biome sample: layered ground plus sparse oak trees.
 
 ground_height = 64
+bedrock_layers = 5
+dirt_layers = 3
+stone_layers = ground_height - bedrock_layers - dirt_layers
+coal_base_y = ground_height - 12
+coal_spread = 10
+iron_base_y = ground_height - 24
+iron_spread = 12
+gold_base_y = ground_height - 32
+gold_spread = 10
+diamond_base_y = bedrock_layers + 12
+diamond_spread = 8
 
 // Terrain
 @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
-  #column .y=-6 .height=4 .block=stone
-  #column .y=-2 .height=2 .block=dirt
+  #column .y=-ground_height .height=bedrock_layers .block=bedrock
+  #column .y=-(ground_height - bedrock_layers) .height=stone_layers .block=stone
+  #column .y=-dirt_layers .height=dirt_layers .block=dirt
   [0, 0, 0] grass_block
 }
 
@@ -23,6 +35,35 @@ ground_height = 64
   [0, tree_base_y+4, -1] oak_leaves
   [0, tree_base_y+4, 1] oak_leaves
   [0, tree_base_y+5, 0] oak_leaves
+}
+
+// Ores
+@noise .frequency=0.18 .seed=27182 .threshold=0.75 .amplitude=coal_spread .base_y=coal_base_y {
+  [0, 0, 0] coal_ore
+  [1, 0, 0] coal_ore
+  [0, 1, 0] coal_ore
+  [0, 0, 1] coal_ore
+}
+
+@noise .frequency=0.16 .seed=11235 .threshold=0.78 .amplitude=iron_spread .base_y=iron_base_y {
+  [0, 0, 0] iron_ore
+  [1, 0, 0] iron_ore
+  [0, 1, 0] iron_ore
+  [0, 0, -1] iron_ore
+}
+
+@noise .frequency=0.12 .seed=44332 .threshold=0.8 .amplitude=gold_spread .base_y=gold_base_y {
+  [0, 0, 0] gold_ore
+  [0, 1, 0] gold_ore
+  [-1, 0, 0] gold_ore
+  [0, 0, 1] gold_ore
+}
+
+@noise .frequency=0.09 .seed=88775 .threshold=0.82 .amplitude=diamond_spread .base_y=diamond_base_y {
+  [0, 0, 0] diamond_ore
+  [0, 1, 0] diamond_ore
+  [1, 0, 0] diamond_ore
+  [0, 0, -1] diamond_ore
 }
 
 // Caves

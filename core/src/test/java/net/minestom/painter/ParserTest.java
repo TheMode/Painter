@@ -137,6 +137,13 @@ final class ParserTest {
                         }
                         """),
                 Arguments.of("""
+                        ground_height = 64
+                        bedrock_layers = 5
+                        stone_top = -(ground_height - bedrock_layers)
+                        stone_cap = -bedrock_layers - 1
+                        #column .y=stone_top .height=bedrock_layers .block=stone
+                        """),
+                Arguments.of("""
                         // Generate terrain (no threshold, just height variation)
                         @noise .frequency=0.025 .seed=77777 .amplitude=20 .base_y=70 {
                           [0, 0, 0] grass_block

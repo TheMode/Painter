@@ -443,32 +443,8 @@ static Expression *parse_additive(Parser *parser) {
   if (!left) return NULL;
 
   while (peek_type() == TOKEN_PLUS || peek_type() == TOKEN_MINUS) {
-    // Decide whether '+'/'-' is a binary operator joining the left and
-    // right expressions, or whether it should be treated as the start of
-    // the next expression (e.g. a signed literal like "-1" used as the
-    // next coordinate). We treat it as the start of the next expression
-    // when the operator is preceded by whitespace in the source. This
-    // allows "[0, -1]" (space before '-') to be parsed as two values where
-    // the second is -1, but still allows "[x+1, z]" (no space before '+')
-    // to be parsed as a binary addition.
-    Token op_tok = peek();
-    if (op_tok.type == TOKEN_PLUS || op_tok.type == TOKEN_MINUS) {
-      Token next_tok = tokenizer_peek_next_token(&parser->tokenizer);
-      if (next_tok.type == TOKEN_NUMBER) {
-        const char *op_start = op_tok.start;
-        const char *inp = parser->tokenizer.input;
-        if (op_start > inp) {
-          char prev = *(op_start - 1);
-          if (prev == ' ' || prev == '\t' || prev == '\n' || prev == '\r' || prev == '\v' || prev == '\f') {
-            break; // treat as start of next expression (signed literal)
-          }
-        }
-      }
-    }
-
-    BinaryOperator op = consume(TOKEN_PLUS) ? OP_ADD : OP_SUBTRACT;
-    if (op != OP_ADD) consume(TOKEN_MINUS);
-
+    Token op_token = next();
+    BinaryOperator op = (op_token.type == TOKEN_PLUS) ? OP_ADD : OP_SUBTRACT;
     Expression *right = parse_multiplicative(parser);
     if (!right) {
       expression_free(left);
