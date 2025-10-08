@@ -1,4 +1,4 @@
 // Simple noise terrain test
 @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 {
-  [0 0 0] grass_block
+  [0, 0, 0] grass_block
 }

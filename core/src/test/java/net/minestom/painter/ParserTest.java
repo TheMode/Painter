@@ -30,69 +30,69 @@ final class ParserTest {
 
     static Stream<Arguments> validPrograms() {
         return Stream.of(
-                Arguments.of("[0 0] air"),
-                Arguments.of("[1 50 0] oak_planks[facing=north,half=top]"),
-                Arguments.of("[x+1 z] oak_planks"),
+                Arguments.of("[0, 0] air"),
+                Arguments.of("[1, 50, 0] oak_planks[facing=north,half=top]"),
+                Arguments.of("[x+1, z] oak_planks"),
                 Arguments.of("""
-                        [x z] oak_planks
-                        [x+1 z] oak_planks
+                        [x, z] oak_planks
+                        [x+1, z] oak_planks
                         """),
                 Arguments.of("""
                         x = 5
-                        [x 0] stone
+                        [x, 0] stone
                         """),
                 Arguments.of("""
                         x = 2
                         z = 3
-                        [x 0 z] dirt
+                        [x, 0, z] dirt
                         """),
                 Arguments.of("""
-                        [min(4, 2, -8) 0 0] stone
+                        [min(4, 2, -8), 0, 0] stone
                         """),
                 Arguments.of("""
                         value = clamp(5, min(1, 3), max(2, 7))
-                        [value 0 0] stone
+                        [value, 0, 0] stone
                         """),
                 Arguments.of("""
                         for i in 0..5 {
-                          [i 36 1] stone
+                          [i, 36, 1] stone
                         }
                         """),
                 Arguments.of("""
                         for x in 0..3 {
                           for z in 0..3 {
-                            [x 37 z] oak_planks
+                            [x, 37, z] oak_planks
                           }
                         }
                         """),
                 Arguments.of("""
                         for i in 0..5 {
-                          [i*2 38 0] diamond_block
+                          [i*2, 38, 0] diamond_block
                         }
                         """),
                 Arguments.of("""
                         offset = 5
                         for i in 0..3 {
-                          [i+offset 39 0] gold_block
+                          [i+offset, 39, 0] gold_block
                         }
                         """),
                 Arguments.of("""
                         for i in -5..5 {
-                          [i 40 0] emerald_block
+                          [i, 40, 0] emerald_block
                         }
                         """),
                 Arguments.of("""
-                        [0 36 0] grass_block
+                        [0, 36, 0] grass_block
                         for i in -25..25 {
                           for z in -25..25 {
-                            [i 28 z] stone
+                            [i, 28, z] stone
                           }
                         }
                         """),
                 Arguments.of("#sphere .x=8 .radius=5 .block=stone"),
                 Arguments.of("#sphere .x=8 .y=5 .z=8 .radius=5 .block=stone"),
-                Arguments.of("#cuboid .from=[0 0 0] .to=[3 2 4] .block=oak_planks .hollow"),
-                Arguments.of("#line .from=[0 0 0] .to=[5 0 0] .block=stone"),
+                Arguments.of("#cuboid .from=[0, 0, 0] .to=[3, 2, 4] .block=oak_planks .hollow"),
+                Arguments.of("#line .from=[0, 0, 0] .to=[5, 0, 0] .block=stone"),
                 Arguments.of("#column .height=5 .block=stone"),
                 Arguments.of("#column .to=12 .block=stone"),
                 Arguments.of("""
@@ -106,53 +106,53 @@ final class ParserTest {
                           angle = y * spirals * 6.28 / tower_height
                           x = radius * cos(angle)
                           z = radius * sin(angle)
-                        
+
                           // Rainbow colors based on height
                           color_index = (y * 16) / tower_height
-                        
+
                           // Different blocks at different heights
                           if(y < tower_height / 3) {
-                            [x y z] red_concrete
+                            [x, y, z] red_concrete
                           } elif(y < tower_height * 2 / 3) {
-                            [x y z] yellow_concrete
+                            [x, y, z] yellow_concrete
                           } else {
-                            [x y z] blue_concrete
+                            [x, y, z] blue_concrete
                           }
                         }
-                        
+
                         // Add a base platform
                         for x in -10..10 {
                           for z in -10..10 {
-                            [x -1 z] stone
+                            [x, -1, z] stone
                           }
                         }
-                        
+
                         // Place a beacon on top
-                        [0 tower_height 0] beacon
+                        [0, tower_height, 0] beacon
                         """),
                 Arguments.of("""
                         repeat = @every .x=0 .y=4 .z=0
                         repeat {
-                          [0 0] oak_planks
+                          [0, 0] oak_planks
                         }
                         """),
                 Arguments.of("""
                         // Generate terrain (no threshold, just height variation)
                         @noise .frequency=0.025 .seed=77777 .amplitude=20 .base_y=70 {
-                          [0 0 0] grass_block
-                          [0 -1 0] dirt
+                          [0, 0, 0] grass_block
+                          [0, -1, 0] dirt
                         }
-                        
+
                         // Add trees with threshold for sparsity, same terrain height
                         @noise .frequency=0.025 .seed=77777 .threshold=0.75 .amplitude=20 .base_y=70 {
-                          [0 1 0] oak_log
-                          [0 2 0] oak_log
-                          [0 3 0] oak_log
-                          [-1 3 0] oak_leaves
-                          [1 3 0] oak_leaves
-                          [0 3 -1] oak_leaves
-                          [0 3 1] oak_leaves
-                          [0 4 0] oak_leaves
+                          [0, 1, 0] oak_log
+                          [0, 2, 0] oak_log
+                          [0, 3, 0] oak_log
+                          [-1, 3, 0] oak_leaves
+                          [1, 3, 0] oak_leaves
+                          [0, 3, -1] oak_leaves
+                          [0, 3, 1] oak_leaves
+                          [0, 4, 0] oak_leaves
                         }
                         """
                 )
@@ -170,11 +170,12 @@ final class ParserTest {
         return Stream.of(
                 Arguments.of("invalid syntax here"),
                 Arguments.of("[0]"), // incomplete coordinate
-                Arguments.of("[0 0 0"), // missing closing bracket
-                Arguments.of("for i in 0.. { [0 0 0] stone }"), // malformed range
+                Arguments.of("[0, 0, 0"), // missing closing bracket
+                Arguments.of("for i in 0.. { [0, 0, 0] stone }"), // malformed range
                 Arguments.of("#sphere .x=5 .radius="), // malformed macro args
-                Arguments.of("repeat = @every .x=0 .y= { repeat { [0 0] oak_planks }"), // broken occurrence
-                Arguments.of("[min(  ,  ) 0 0] stone") // malformed function call
+                Arguments.of("repeat = @every .x=0 .y= { repeat { [0, 0] oak_planks }"), // broken occurrence
+                Arguments.of("[0 0 0] stone"), // missing commas between coordinate axes
+                Arguments.of("[min(  ,  ), 0, 0] stone") // malformed function call
         );
     }
 
@@ -223,8 +224,8 @@ final class ParserTest {
     }
 
     @PaintTest("""
-            #cuboid .from=[0 0 0] .to=[2 1 1] .block=stone
-            #cuboid .from=[14 0 0] .to=[17 1 0] .block=gold_block
+            #cuboid .from=[0, 0, 0] .to=[2, 1, 1] .block=stone
+            #cuboid .from=[14, 0, 0] .to=[17, 1, 0] .block=gold_block
             """)
     @DisplayName("#cuboid macro fills volume and spans section boundaries")
     void testCuboidMacroAcrossSections(ProgramContext ctx) {
@@ -249,10 +250,10 @@ final class ParserTest {
     }
 
     @PaintTest("""
-            #line .from=[0 0 0] .to=[5 0 0] .block=stone
-            #line .from=[0 1 0] .to=[5 5 0] .block=gold_block
-            #line .from=[14 2 0] .to=[18 2 0] .block=iron_block
-            #line .from=[0 3 0] .to=[3 6 3] .block=copper_block
+            #line .from=[0, 0, 0] .to=[5, 0, 0] .block=stone
+            #line .from=[0, 1, 0] .to=[5, 5, 0] .block=gold_block
+            #line .from=[14, 2, 0] .to=[18, 2, 0] .block=iron_block
+            #line .from=[0, 3, 0] .to=[3, 6, 3] .block=copper_block
             """)
     @DisplayName("#line macro draws axis-aligned, diagonal, and cross-section segments")
    void testLineMacro(ProgramContext ctx) {
@@ -357,7 +358,7 @@ final class ParserTest {
 
     @PaintTest("""
             @every .x=0 .y=4 .z=0 {
-              [0 0] oak_planks
+              [0, 0] oak_planks
             }
             """)
     @DisplayName("@every occurrence places repeated blocks")
@@ -374,8 +375,8 @@ final class ParserTest {
     }
 
     @PaintTest("""
-            [0 0 0] minecraft:oak_log[axis=y]
-            [1 0 0] minecraft:oak_log[axis=y]
+            [0, 0, 0] minecraft:oak_log[axis=y]
+            [1, 0, 0] minecraft:oak_log[axis=y]
             """)
     @DisplayName("Block placements reuse cached identifiers with properties")
     void blockPlacementsReuseFormattedIdentifier(ProgramContext ctx) {
@@ -391,15 +392,15 @@ final class ParserTest {
             x = 5
             
             if(x < 3) {
-              [0 0 0] stone
+              [0, 0, 0] stone
             } elif(x < 7) {
-              [1 0 0] diamond_block
+              [1, 0, 0] diamond_block
             } else {
-              [2 0 0] gold_block
+              [2, 0, 0] gold_block
             }
             
             if(x == 5) {
-              [3 0 0] emerald_block
+              [3, 0, 0] emerald_block
             }
             """)
     @DisplayName("If/elif/else conditional statements work correctly")
@@ -421,8 +422,8 @@ final class ParserTest {
     @PaintTest("""
             // Terrain with amplitude and base_y
             @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 {
-              [0 0 0] grass_block
-              [0 -1 0] dirt
+              [0, 0, 0] grass_block
+              [0, -1, 0] dirt
             }
             """)
     @DisplayName("@noise occurrence generates terrain")
@@ -436,7 +437,7 @@ final class ParserTest {
     @PaintTest("""
             // Sparse placement using threshold (only 30% of area)
             @noise .frequency=0.05 .seed=12345 .threshold=0.7 {
-              [0 0 0] oak_sapling
+              [0, 0, 0] oak_sapling
             }
             """)
     @DisplayName("@noise occurrence with threshold for sparse placement")
@@ -447,14 +448,14 @@ final class ParserTest {
     @PaintTest("""
             // Trees on terrain: threshold for sparsity + amplitude for terrain following
             @noise .frequency=0.1 .seed=12345 .threshold=0.7 .amplitude=16 .base_y=64 {
-              [0 0 0] oak_log
-              [0 1 0] oak_log
-              [0 2 0] oak_log
-              [-1 3 0] oak_leaves
-              [1 3 0] oak_leaves
-              [0 3 -1] oak_leaves
-              [0 3 1] oak_leaves
-              [0 3 0] oak_leaves
+              [0, 0, 0] oak_log
+              [0, 1, 0] oak_log
+              [0, 2, 0] oak_log
+              [-1, 3, 0] oak_leaves
+              [1, 3, 0] oak_leaves
+              [0, 3, -1] oak_leaves
+              [0, 3, 1] oak_leaves
+              [0, 3, 0] oak_leaves
             }
             """)
     @DisplayName("@noise occurrence places trees on terrain")
@@ -478,12 +479,12 @@ final class ParserTest {
 
     @PaintTest("""
             @section .x=8 .z=8 {
-              [0 0 0] oak_log
-              [0 1 0] oak_log
-              [0 2 0] oak_log
-              [-1 3 0] oak_leaves
-              [0 3 0] oak_leaves
-              [1 3 0] oak_leaves
+              [0, 0, 0] oak_log
+              [0, 1, 0] oak_log
+              [0, 2, 0] oak_log
+              [-1, 3, 0] oak_leaves
+              [0, 3, 0] oak_leaves
+              [1, 3, 0] oak_leaves
             }
             """)
     @DisplayName("@section occurrence places structure at section offset")
@@ -509,7 +510,7 @@ final class ParserTest {
 
     @PaintTest("""
             @section .x=5 .y=10 .z=7 {
-              [0 0 0] beacon
+              [0, 0, 0] beacon
             }
             """)
     @DisplayName("@section occurrence with y offset places at correct height")
@@ -524,7 +525,7 @@ final class ParserTest {
 
     @PaintTest("""
             @section {
-              [0 0 0] gold_block
+              [0, 0, 0] gold_block
             }
             """)
     @DisplayName("@section occurrence with default offsets places at section origin")
@@ -539,8 +540,8 @@ final class ParserTest {
 
     @PaintTest("""
             @section {
-              [0 0] oak_log
-              [0 -1] dirt
+              [0, 0] oak_log
+              [0, -1] dirt
             }
             """)
     @DisplayName("@section two-value coords map to x,0,z (xz -> xyz)")
@@ -551,17 +552,17 @@ final class ParserTest {
         assertPaletteContains(section, "oak_log", "air");
         assertPaletteContains(below, "dirt", "air");
 
-        // [0 0] -> [0 0 0] (in this section)
+        // [0, 0] -> [0, 0, 0] (in this section)
         assertBlockAt(section, 0, 0, 0, "oak_log");
 
-        // [0 -1] -> [0 0 -1] which lives in the section at z=-1, local z=15
+        // [0, -1] -> [0, 0, -1] which lives in the section at z=-1, local z=15
         assertBlockAt(below, 0, 0, 15, "dirt");
     }
 
     @PaintTest("""
             // Place a marker at center of every section
             @section .x=8 .y=8 .z=8 {
-              [0 0 0] emerald_block
+              [0, 0, 0] emerald_block
             }
             """)
     @DisplayName("@section applies across multiple sections (regression)")
@@ -584,11 +585,11 @@ final class ParserTest {
     @PaintTest("""
             // Mix of section offsets to ensure independent placement
             @section .x=0 .y=0 .z=0 {
-              [0 0 0] diamond_block
+              [0, 0, 0] diamond_block
             }
             
             @section .x=15 .y=15 .z=15 {
-              [0 0 0] gold_block
+              [0, 0, 0] gold_block
             }
             """)
     @DisplayName("@section multiple offsets in same program")
@@ -611,7 +612,7 @@ final class ParserTest {
 
     @PaintTest("""
             @every .x=2 .y=0 .z=0 {
-              [0 0 0] stone
+              [0, 0, 0] stone
             }
             """)
     @DisplayName("@every with step in X axis places blocks at every 2 X positions")
@@ -628,7 +629,7 @@ final class ParserTest {
 
     @PaintTest("""
             @every .x=4 .z=4 {
-              [0 0 0] stone
+              [0, 0, 0] stone
             }
             """)
     @DisplayName("@every defaults missing axis steps to zero")
@@ -684,7 +685,7 @@ final class ParserTest {
 
     @PaintTest("""
             @every .x=0 .y=0 .z=0 {
-              [0 0 0] gold_block
+              [0, 0, 0] gold_block
             }
             """)
     @DisplayName("@every with zero steps executes exactly once")
@@ -699,7 +700,7 @@ final class ParserTest {
     @PaintTest("""
             repeat = @every .x=0 .y=4 .z=0
             repeat {
-              [0 0] oak_planks
+              [0, 0] oak_planks
             }
             """)
     @DisplayName("@every places blocks across multiple vertical sections")
@@ -722,7 +723,7 @@ final class ParserTest {
 
     @PaintTest("""
             @every .x=0 .y=1 .z=0 {
-              [0 0] dirt
+              [0, 0] dirt
             }
             """)
     @DisplayName("@every vertical unit step builds tower across many sections")
@@ -763,7 +764,7 @@ final class ParserTest {
     @PaintTest("""
             // Test noise2d function - returns value in range -1 to 1
             noise_val = noise2d(10, 20, 0.1, 12345)
-            [5 0 0] stone
+            [5, 0, 0] stone
             """)
     @DisplayName("noise2d function returns expected values")
     void testNoise2dFunction(ProgramContext ctx) {
@@ -777,7 +778,7 @@ final class ParserTest {
     @PaintTest("""
             // Test noise3d function - returns value in range -1 to 1
             noise_val = noise3d(5, 10, 15, 0.1, 54321)
-            [5 0 0] gold_block
+            [5, 0, 0] gold_block
             """)
     @DisplayName("noise3d function returns expected values")
     void testNoise3dFunction(ProgramContext ctx) {
@@ -797,7 +798,7 @@ final class ParserTest {
             @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
               #column .y=-6 .height=4 .block=stone
               #column .y=-2 .height=2 .block=dirt
-              [0 0 0] grass_block
+              [0, 0, 0] grass_block
             }
             
             // Use tree-specific noise for placement, and compute the terrain height at each tree position
@@ -811,11 +812,11 @@ final class ParserTest {
               #column .y=tree_base_y+1 .height=3 .block=oak_log
               
               // Place leaves at the top of the trunk
-              [-1 tree_base_y+4 0] oak_leaves
-              [1 tree_base_y+4 0] oak_leaves
-              [0 tree_base_y+4 -1] oak_leaves
-              [0 tree_base_y+4 1] oak_leaves
-              [0 tree_base_y+5 0] oak_leaves
+              [-1, tree_base_y+4, 0] oak_leaves
+              [1, tree_base_y+4, 0] oak_leaves
+              [0, tree_base_y+4, -1] oak_leaves
+              [0, tree_base_y+4, 1] oak_leaves
+              [0, tree_base_y+5, 0] oak_leaves
             }
             """)
     @DisplayName("plain_forest.paint generates terrain and trees with proper height alignment")
@@ -840,8 +841,8 @@ final class ParserTest {
             ground_height = 64
             
             @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
-              [0 0 0] grass_block
-              [0 -1 0] dirt
+              [0, 0, 0] grass_block
+              [0, -1, 0] dirt
             }
             """)
     @DisplayName("Terrain generates at correct heights based on noise amplitude")
@@ -881,7 +882,7 @@ final class ParserTest {
             
             // Generate terrain at a specific location
             @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
-              [0 0 0] grass_block
+              [0, 0, 0] grass_block
             }
             
             // Place markers at calculated positions using the same system as trees
@@ -891,8 +892,8 @@ final class ParserTest {
               tree_base_y = ground_height + floor(terrain_noise * 2)
               
               // Place a diamond marker at the calculated position
-              [0 tree_base_y 0] emerald_block
-              [0 tree_base_y+1 0] diamond_block
+              [0, tree_base_y, 0] emerald_block
+              [0, tree_base_y+1, 0] diamond_block
             }
             """)
     @DisplayName("Markers placed with calculated Y match terrain when using base_y=0")
@@ -933,7 +934,7 @@ final class ParserTest {
             @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
               #column .y=-6 .height=4 .block=stone
               #column .y=-2 .height=2 .block=dirt
-              [0 0 0] grass_block
+              [0, 0, 0] grass_block
             }
             
             // Place trees using separate noise for sparse placement
@@ -949,11 +950,11 @@ final class ParserTest {
               #column .y=tree_base_y+1 .height=3 .block=oak_log
               
               // Place leaves at the top of the trunk (absolute Y coordinates)
-              [-1 tree_base_y+4 0] oak_leaves
-              [1 tree_base_y+4 0] oak_leaves
-              [0 tree_base_y+4 -1] oak_leaves
-              [0 tree_base_y+4 1] oak_leaves
-              [0 tree_base_y+5 0] oak_leaves
+              [-1, tree_base_y+4, 0] oak_leaves
+              [1, tree_base_y+4, 0] oak_leaves
+              [0, tree_base_y+4, -1] oak_leaves
+              [0, tree_base_y+4, 1] oak_leaves
+              [0, tree_base_y+5, 0] oak_leaves
             }
             """)
     @DisplayName("plain_forest.paint generates terrain with trees correctly aligned on grass")
@@ -1004,7 +1005,7 @@ final class ParserTest {
             
             // Generate terrain
             @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
-              [0 0 0] grass_block
+              [0, 0, 0] grass_block
             }
             
             // Place a marker at specific coordinates where we know the terrain height
@@ -1015,7 +1016,7 @@ final class ParserTest {
             calculated_y = ground_height + floor(terrain_noise * 2)
             
             // Place a marker one block above the grass
-            [test_x calculated_y+1 test_z] diamond_block
+            [test_x, calculated_y+1, test_z] diamond_block
             """)
     @DisplayName("Calculated Y from noise2d matches actual terrain height")
     void testCalculatedTerrainHeight(ProgramContext ctx) {
@@ -1043,7 +1044,7 @@ final class ParserTest {
             }
         }
         
-        // The issue: grass is placed at [0 0 0] RELATIVE to each noise sample point
+        // The issue: grass is placed at [0, 0, 0] RELATIVE to each noise sample point
         // So grass appears at various XZ positions based on where noise samples
         // But the diamond is placed at absolute [8, calculated_y+1, 8]
         // These are not the same system!
@@ -1057,7 +1058,7 @@ final class ParserTest {
             @noise .frequency=0.6 .seed=99999 .threshold=0.95 {
               terrain_noise = noise2d(x, z, 0.05, 31415)
               calculated_y = 64 + floor(terrain_noise * 2)
-              [0 calculated_y 0] stone
+              [0, calculated_y, 0] stone
             }
             """)
     @DisplayName("Test calculated_y with floor and scaling - demonstrates coordinate system issue")
@@ -1111,7 +1112,7 @@ final class ParserTest {
             @noise .frequency=0.6 .seed=99999 .threshold=0.95 .base_y=0 {
               terrain_noise = noise2d(x, z, 0.05, 31415)
               calculated_y = 64 + floor(terrain_noise * 2)
-              [0 calculated_y 0] diamond_block
+              [0, calculated_y, 0] diamond_block
             }
             """)
     @DisplayName("Correct usage with .base_y=0 creates consistent absolute Y positions")
@@ -1161,11 +1162,11 @@ final class ParserTest {
             // Test the reported issue: noise2d returns fractional values that get used as Y coordinates
             @noise .frequency=0.6 .seed=99999 .threshold=0.95 {
               terrain_noise = noise2d(x, z, 0.05, 31415)
-              [0 terrain_noise 0] stone
+              [0, terrain_noise, 0] stone
               
               // Also test what happens when we scale it
               scaled_noise = terrain_noise * 10
-              [1 scaled_noise 0] gold_block
+              [1, scaled_noise, 0] gold_block
             }
             """)
     @DisplayName("noise2d fractional values used as Y coordinates")
@@ -1210,7 +1211,7 @@ final class ParserTest {
               y_offset = floor(noise_val * 8)  // Scale to -8..8 range
               
               // Place at absolute world Y = 64 + offset
-              [0 64+y_offset 0] emerald_block
+              [0, 64+y_offset, 0] emerald_block
             }
             """)
     @DisplayName("Properly scaled noise2d values create varied Y positions")
@@ -1241,5 +1242,3 @@ final class ParserTest {
         }
     }
 }
-
-

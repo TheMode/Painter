@@ -74,7 +74,7 @@ Example:
 ```painter
 // Place a marker every 4 blocks vertically
 @every(0, 4, 0) {
-  [0 0 0] oak_planks
+  [0, 0, 0] oak_planks
 }
 ```
 
@@ -97,22 +97,22 @@ Place blocks once per section (16x16x16) at a specific offset within the section
 ```painter
 // Place a tree at the center of each section (8, *, 8)
 @section .x=8 .z=8 {
-  [0 0 0] oak_log
-  [0 1 0] oak_log
-  [0 2 0] oak_log
-  [-1 3 0] oak_leaves
-  [0 3 0] oak_leaves
-  [1 3 0] oak_leaves
+  [0, 0, 0] oak_log
+  [0, 1, 0] oak_log
+  [0, 2, 0] oak_log
+  [-1, 3, 0] oak_leaves
+  [0, 3, 0] oak_leaves
+  [1, 3, 0] oak_leaves
 }
 
 // Place a beacon at specific section coordinates
 @section .x=5 .y=10 .z=7 {
-  [0 0 0] beacon
+  [0, 0, 0] beacon
 }
 
 // Place at section origin (0, 0, 0)
 @section {
-  [0 0 0] bedrock
+  [0, 0, 0] bedrock
 }
 ```
 
@@ -150,9 +150,9 @@ Use amplitude + base_y, omit or set threshold to 0:
 ```painter
 // Rolling hills varying ±16 blocks around y=64
 @noise(0.02, 12345, 0, 16, 64) {
-  [0 0 0] grass_block
-  [0 -1 0] dirt
-  [0 -2 0] stone
+  [0, 0, 0] grass_block
+  [0, -1, 0] dirt
+  [0, -2, 0] stone
 }
 ```
 
@@ -162,10 +162,10 @@ Use threshold for sparsity + amplitude to follow terrain:
 // Trees on 30% of terrain, following height variations
 @noise(0.02, 12345, 0.7, 16, 65) {
   // base_y=65 (terrain+1) places tree on top
-  [0 0 0] oak_log
-  [0 1 0] oak_log
-  [0 2 0] oak_log
-  [0 3 0] oak_leaves
+  [0, 0, 0] oak_log
+  [0, 1, 0] oak_log
+  [0, 2, 0] oak_log
+  [0, 3, 0] oak_leaves
 }
 ```
 
@@ -174,7 +174,7 @@ Use threshold only (no amplitude) for flat sparse placement:
 ```painter
 // Flowers on 10% of area at y=64
 @noise(0.1, 12345, 0.9) {
-  [0 64 0] dandelion
+  [0, 64, 0] dandelion
 }
 ```
 
@@ -193,23 +193,23 @@ Layer multiple @noise occurrences with same seed but different thresholds:
 ```painter
 // Base terrain (full coverage)
 @noise(0.025, 77777, 0, 20, 64) {
-  [0 0 0] grass_block
-  [0 -1 0] dirt
+  [0, 0, 0] grass_block
+  [0, -1, 0] dirt
 }
 
 // Trees (25% coverage, on terrain)
 @noise(0.025, 77777, 0.75, 20, 65) {
-  [0 0 0] oak_log
-  [0 1 0] oak_log
-  [0 2 0] oak_log
-  [-1 2 0] oak_leaves
-  [1 2 0] oak_leaves
-  [0 3 0] oak_leaves
+  [0, 0, 0] oak_log
+  [0, 1, 0] oak_log
+  [0, 2, 0] oak_log
+  [-1, 2, 0] oak_leaves
+  [1, 2, 0] oak_leaves
+  [0, 3, 0] oak_leaves
 }
 
 // Flowers (5% coverage, on terrain)
 @noise(0.025, 77777, 0.95, 20, 65) {
-  [0 0 0] dandelion
+  [0, 0, 0] dandelion
 }
 ```
 

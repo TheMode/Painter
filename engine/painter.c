@@ -384,7 +384,7 @@ static Expression *parse_primary(Parser *parser) {
     return expr;
   }
 
-  // Handle coordinate [x y z]
+  // Handle coordinate [x, y, z]
   if (consume(TOKEN_LEFT_BRACKET)) {
     return parse_coordinate(parser);
   }
@@ -448,8 +448,8 @@ static Expression *parse_additive(Parser *parser) {
     // the next expression (e.g. a signed literal like "-1" used as the
     // next coordinate). We treat it as the start of the next expression
     // when the operator is preceded by whitespace in the source. This
-    // allows "[0 -1]" (space before '-') to be parsed as two values where
-    // the second is -1, but still allows "[x+1 z]" (no space before '+')
+    // allows "[0, -1]" (space before '-') to be parsed as two values where
+    // the second is -1, but still allows "[x+1, z]" (no space before '+')
     // to be parsed as a binary addition.
     Token op_tok = peek();
     if (op_tok.type == TOKEN_PLUS || op_tok.type == TOKEN_MINUS) {
@@ -546,26 +546,22 @@ static Expression *parse_coordinate(Parser *parser) {
   coord->coordinate.x = parse_expression(parser);
   if (!coord->coordinate.x) goto error;
 
-  // Handle optional comma after first expression (allow both "[x z]" and "[x, z]")
-  consume(TOKEN_COMMA);
+  if (!expect_token(parser, TOKEN_COMMA, "Expected ',' between coordinate values")) {
+    goto error;
+  }
 
-  if (peek_type() != TOKEN_RIGHT_BRACKET) {
-    // Parse second value (could be y or z depending on whether there's a third)
-    Expression *second = parse_expression(parser);
-    if (!second) goto error;
+  // Parse second value (could be y or z depending on whether there's a third)
+  Expression *second = parse_expression(parser);
+  if (!second) goto error;
 
-    // Optional comma between second and third values
-    consume(TOKEN_COMMA);
-
-    if (peek_type() != TOKEN_RIGHT_BRACKET) {
-      // Three values provided: [x y z]
-      coord->coordinate.y = second;
-      coord->coordinate.z = parse_expression(parser);
-      if (!coord->coordinate.z) goto error;
-    } else {
-      // Two values provided: [x z], y defaults to 0
-      coord->coordinate.z = second;
-    }
+  if (consume(TOKEN_COMMA)) {
+    // Three values provided: [x, y, z]
+    coord->coordinate.y = second;
+    coord->coordinate.z = parse_expression(parser);
+    if (!coord->coordinate.z) goto error;
+  } else {
+    // Two values provided: [x, z], y defaults to 0
+    coord->coordinate.z = second;
   }
 
   if (!expect_token(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after coordinate")) {
@@ -1171,7 +1167,7 @@ static Instruction *parse_instruction(Parser *parser) {
     return NULL;
   }
 
-  // Block placement: [x y z] block_name
+  // Block placement: [x, y, z] block_name
   if (peek_type() == TOKEN_LEFT_BRACKET) {
     instr->type = INSTR_BLOCK_PLACEMENT;
     instr->block_placement = parse_block_placement(parser);

@@ -120,7 +120,7 @@ typedef struct Expression {
   };
 } Expression;
 
-// Block placement: [x y z] block_name[properties]
+// Block placement: [x, y, z] block_name[properties]
 typedef struct BlockPlacement {
   Expression *coordinate;
   char block_name[MAX_TOKEN_VALUE_LENGTH];

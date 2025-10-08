@@ -49,7 +49,7 @@ class FunctionTest {
     void minFunctionPlacesBlockAtLowestValue() {
         PainterParser.SectionData section = execute("""
                 value = min(7, 3, 9)
-                [value 0 0] stone
+                [value, 0, 0] stone
                 """);
 
         int stoneIndex = paletteIndex(section.palette(), "stone");
@@ -62,7 +62,7 @@ class FunctionTest {
     @DisplayName("floor collapses fractional positions")
     void floorFunctionPlacesBlockAtFlooredValue() {
         PainterParser.SectionData section = execute("""
-                [floor(2.9) 0 0] stone
+                [floor(2.9), 0, 0] stone
                 """);
 
         int stoneIndex = paletteIndex(section.palette(), "stone");
@@ -74,7 +74,7 @@ class FunctionTest {
     @DisplayName("clamp restricts coordinates within bounds")
     void clampFunctionRespectsBounds() {
         PainterParser.SectionData section = execute("""
-                [clamp(32, 0, 15) 0 0] stone
+                [clamp(32, 0, 15), 0, 0] stone
                 """);
 
         int stoneIndex = paletteIndex(section.palette(), "stone");

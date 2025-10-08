@@ -159,10 +159,10 @@ public final class PainterParser {
      */
     static void main(String[] args) {
         String[] tests = {
-                "[0 0] air",
-                "[0 50 0] minecraft:grass_block",
-                "[0 50 5] stone",
-                "[5 10 15] dirt"
+                "[0, 0] air",
+                "[0, 50, 0] minecraft:grass_block",
+                "[0, 50, 5] stone",
+                "[5, 10, 15] dirt"
         };
 
         for (String test : tests) {
@@ -185,6 +185,6 @@ public final class PainterParser {
         }
 
         System.out.println("\n✓ All coordinate tests passed!");
-        System.out.println("Format: [x z] (2 values, y defaults to 0) or [x y z] (3 values)");
+        System.out.println("Format: [x, z] (2 values, y defaults to 0) or [x, y, z] (3 values)");
     }
 }

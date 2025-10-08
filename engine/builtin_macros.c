@@ -204,7 +204,7 @@ void builtin_macro_sphere(ExecutionState *state, const NamedArgumentList *args) 
   }
 }
 
-// Cuboid macro: #cuboid .from=[x y z] .to=[x y z] .block=<block_name> [.hollow]
+// Cuboid macro: #cuboid .from=[x, y, z] .to=[x, y, z] .block=<block_name> [.hollow]
 void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) {
   if (!state) return;
 
@@ -317,7 +317,7 @@ void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) 
   }
 }
 
-// Line macro: #line .from=[x y z] .to=[x y z] .block=<block_name>
+// Line macro: #line .from=[x, y, z] .to=[x, y, z] .block=<block_name>
 void builtin_macro_line(ExecutionState *state, const NamedArgumentList *args) {
   if (!state) return;
 

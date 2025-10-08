@@ -16,7 +16,7 @@ import java.lang.annotation.Target;
  * <pre>
  * {@code
  * @PaintTest("""
- *     [0 0] stone
+ *     [0, 0] stone
  *     """)
  * void testSomething(ProgramContext ctx) {
  *     // Use ctx.program() to access the parsed program
