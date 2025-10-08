@@ -145,13 +145,13 @@ final class ParserTest {
                         """),
                 Arguments.of("""
                         // Generate terrain (no threshold, just height variation)
-                        @noise .frequency=0.025 .seed=77777 .amplitude=20 .base_y=70 {
+                        @noise2d .frequency=0.025 .seed=77777 .spread=20 .y=70 {
                           [0, 0, 0] grass_block
                           [0, -1, 0] dirt
                         }
 
                         // Add trees with threshold for sparsity, same terrain height
-                        @noise .frequency=0.025 .seed=77777 .threshold=0.75 .amplitude=20 .base_y=70 {
+                        @noise2d .frequency=0.025 .seed=77777 .threshold=0.75 .spread=20 .y=70 {
                           [0, 1, 0] oak_log
                           [0, 2, 0] oak_log
                           [0, 3, 0] oak_log
@@ -427,13 +427,13 @@ final class ParserTest {
     }
 
     @PaintTest("""
-            // Terrain with amplitude and base_y
-            @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 {
+            // Terrain with spread and explicit y center
+            @noise2d .frequency=0.02 .seed=12345 .spread=16 .y=64 {
               [0, 0, 0] grass_block
               [0, -1, 0] dirt
             }
             """)
-    @DisplayName("@noise occurrence generates terrain")
+    @DisplayName("@noise2d occurrence generates terrain")
     void testNoiseTerrainOccurrence(ProgramContext ctx) {
         // Generate a few sections to ensure the noise generation works
         for (int y = 0; y < 5; y++) {
@@ -443,18 +443,18 @@ final class ParserTest {
 
     @PaintTest("""
             // Sparse placement using threshold (only 30% of area)
-            @noise .frequency=0.05 .seed=12345 .threshold=0.7 {
+            @noise2d .frequency=0.05 .seed=12345 .threshold=0.7 {
               [0, 0, 0] oak_sapling
             }
             """)
-    @DisplayName("@noise occurrence with threshold for sparse placement")
+    @DisplayName("@noise2d occurrence with threshold for sparse placement")
     void testNoiseThresholdOccurrence(ProgramContext ctx) {
         ctx.generateSection(0, 0, 0);
     }
 
     @PaintTest("""
             // Trees on terrain: threshold for sparsity + amplitude for terrain following
-            @noise .frequency=0.1 .seed=12345 .threshold=0.7 .amplitude=16 .base_y=64 {
+            @noise2d .frequency=0.1 .seed=12345 .threshold=0.7 .spread=16 .y=64 {
               [0, 0, 0] oak_log
               [0, 1, 0] oak_log
               [0, 2, 0] oak_log
@@ -465,7 +465,7 @@ final class ParserTest {
               [0, 3, 0] oak_leaves
             }
             """)
-    @DisplayName("@noise occurrence places trees on terrain")
+    @DisplayName("@noise2d occurrence places trees on terrain")
     void testNoiseTreesOccurrence(ProgramContext ctx) {
         PainterParser.SectionData section = ctx.generateSection(0, 4, 0);
 
@@ -481,6 +481,44 @@ final class ParserTest {
             }
             assertTrue(hasTreeBlocks || section.palette().length == 1,
                     "Section should have tree blocks or be empty (air)");
+        }
+    }
+
+    @PaintTest("""
+            @noise3d .frequency=0.05 .seed=424242 .threshold=0.5 {
+              [0, 0, 0] glowstone
+            }
+            """)
+    @DisplayName("@noise3d occurrence scatters blocks in a volume")
+    void testNoise3dOccurrence(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 8, 0);
+        assertPaletteContains(section, "glowstone", "air");
+    }
+
+    @PaintTest("""
+            @noise3d .frequency=1.0 .seed=1337 .min_y=4 .max_y=6 {
+              [0, 0, 0] emerald_block
+            }
+            """)
+    @DisplayName("@noise3d honors min_y/max_y bounds")
+    void testNoise3dClampedBand(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "emerald_block", "air");
+
+        int emeraldIndex = paletteIndex(section, "emerald_block");
+        int airIndex = paletteIndex(section, "air");
+
+        for (int y = 0; y < 16; y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    int actual = blockIndex(section, x, y, z);
+                    if (y >= 4 && y <= 6) {
+                        assertEquals(emeraldIndex, actual, "Expected emerald_block within clamped band");
+                    } else {
+                        assertEquals(airIndex, actual, "Expected air outside clamped band");
+                    }
+                }
+            }
         }
     }
 
@@ -748,13 +786,13 @@ final class ParserTest {
 
     @PaintTest("""
             ground_height = 64
-            @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+            @noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
               #column .y=-5 .height=2 .block=stone
             }
             """)
-    @DisplayName("@noise with #column using negative y offset should not hang CPU")
+    @DisplayName("@noise2d with #column using negative y offset should not hang CPU")
     void testNoiseWithColumnNegativeOffset(ProgramContext ctx) {
-        // This test verifies that @noise with base_y=64 and #column with y=-5 height=2
+        // This test verifies that @noise2d with y=64 and #column with y=-5 height=2
         // correctly creates 2 stone blocks (not 3!) at the expected positions.
         // With ground_height=64, amplitude=2, noise places anchors at y=62-66.
         // Column with y=-5, height=2 should place 2 blocks starting at (62-66)+(-5) = 57-61.
@@ -802,7 +840,7 @@ final class ParserTest {
             ground_height = 64
             
             // Generate rolling terrain using noise; columns fill stone/dirt while the top block is grass.
-            @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+            @noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
               #column .y=-6 .height=4 .block=stone
               #column .y=-2 .height=2 .block=dirt
               [0, 0, 0] grass_block
@@ -810,7 +848,7 @@ final class ParserTest {
             
             // Use tree-specific noise for placement, and compute the terrain height at each tree position
             // so the tree base sits exactly on top of the grass layer.
-            @noise .frequency=0.08 .seed=99999 .threshold=0.85 {
+            @noise2d .frequency=0.08 .seed=99999 .threshold=0.85 {
               // Calculate terrain height at this position using the same noise as terrain generation
               terrain_noise = noise2d(x, z, 0.05, 31415)
               tree_base_y = ground_height + floor(terrain_noise * 2)
@@ -847,7 +885,7 @@ final class ParserTest {
             // Test terrain generation with known noise values
             ground_height = 64
             
-            @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+            @noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
               [0, 0, 0] grass_block
               [0, -1, 0] dirt
             }
@@ -860,7 +898,7 @@ final class ParserTest {
         assertPaletteContains(section4, "grass_block", "dirt");
         
         // Check that grass and dirt exist at reasonable positions
-        // With amplitude=2 and base_y=64, terrain should be at Y 62-66
+        // With spread=2 and y=64, terrain should be at Y 62-66
         // In section 4 (Y 64-79), this means local Y 0-2
         boolean foundGrass = false;
         boolean foundDirt = false;
@@ -888,12 +926,12 @@ final class ParserTest {
             ground_height = 64
             
             // Generate terrain at a specific location
-            @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+            @noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
               [0, 0, 0] grass_block
             }
             
             // Place markers at calculated positions using the same system as trees
-            @noise .frequency=1.0 .seed=55555 .threshold=0.99 .base_y=0 {
+            @noise2d .frequency=1.0 .seed=55555 .threshold=0.99 .y=0 {
               // Calculate terrain height at this XZ position
               terrain_noise = noise2d(x, z, 0.05, 31415)
               tree_base_y = ground_height + floor(terrain_noise * 2)
@@ -903,7 +941,7 @@ final class ParserTest {
               [0, tree_base_y+1, 0] diamond_block
             }
             """)
-    @DisplayName("Markers placed with calculated Y match terrain when using base_y=0")
+    @DisplayName("Markers placed with calculated Y match terrain when using y=0")
     void testCalculatedTerrainHeightWithBaseY(ProgramContext ctx) {
         PainterParser.SectionData section4 = ctx.generateSection(0, 4, 0);
         
@@ -938,16 +976,16 @@ final class ParserTest {
             ground_height = 64
             
             // Generate rolling terrain using noise; columns fill stone/dirt while the top block is grass.
-            @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+            @noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
               #column .y=-6 .height=4 .block=stone
               #column .y=-2 .height=2 .block=dirt
               [0, 0, 0] grass_block
             }
             
             // Place trees using separate noise for sparse placement
-            // The key: we set .base_y=0 so the anchor is at world Y=0, then we calculate
+            // The key: we set .y=0 so the anchor is at world Y=0, then we calculate
             // absolute Y coordinates for tree placement based on the terrain noise
-            @noise .frequency=0.6 .seed=99999 .threshold=0.95 .base_y=0 {
+            @noise2d .frequency=0.6 .seed=99999 .threshold=0.95 .y=0 {
               // Calculate terrain height at this XZ position using the same noise as terrain generation
               terrain_noise = noise2d(x, z, 0.05, 31415)
               tree_base_y = ground_height + floor(terrain_noise * 2)
@@ -1011,7 +1049,7 @@ final class ParserTest {
             ground_height = 64
             
             // Generate terrain
-            @noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+            @noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
               [0, 0, 0] grass_block
             }
             
@@ -1061,8 +1099,8 @@ final class ParserTest {
     }
 
     @PaintTest("""
-            // Test the exact reported issue with calculated_y WITHOUT .base_y
-            @noise .frequency=0.6 .seed=99999 .threshold=0.95 {
+            // Test the exact reported issue with calculated_y WITHOUT .y
+            @noise2d .frequency=0.6 .seed=99999 .threshold=0.95 {
               terrain_noise = noise2d(x, z, 0.05, 31415)
               calculated_y = 64 + floor(terrain_noise * 2)
               [0, calculated_y, 0] stone
@@ -1070,7 +1108,7 @@ final class ParserTest {
             """)
     @DisplayName("Test calculated_y with floor and scaling - demonstrates coordinate system issue")
     void testCalculatedYWithFloor(ProgramContext ctx) {
-        System.out.println("Stone blocks with calculated_y (WITHOUT .base_y=0):");
+        System.out.println("Stone blocks with calculated_y (WITHOUT .y=0):");
         
         java.util.Map<Integer, java.util.List<String>> stonesBySection = new java.util.TreeMap<>();
         
@@ -1109,22 +1147,22 @@ final class ParserTest {
         
         System.out.println("\nSummary: Stones appear at different absolute Y per section!");
         System.out.println("This is because coordinates are RELATIVE to origin_y");
-        System.out.println("Solution: Use .base_y=0 to make coordinates absolute");
+        System.out.println("Solution: Use .y=0 to make coordinates absolute");
         
         assertTrue(true, "Test demonstrates coordinate system issue");
     }
 
     @PaintTest("""
-            // CORRECT way: Use .base_y=0 for absolute coordinates
-            @noise .frequency=0.6 .seed=99999 .threshold=0.95 .base_y=0 {
+            // CORRECT way: Use .y=0 for absolute coordinates
+            @noise2d .frequency=0.6 .seed=99999 .threshold=0.95 .y=0 {
               terrain_noise = noise2d(x, z, 0.05, 31415)
               calculated_y = 64 + floor(terrain_noise * 2)
               [0, calculated_y, 0] diamond_block
             }
             """)
-    @DisplayName("Correct usage with .base_y=0 creates consistent absolute Y positions")
+    @DisplayName("Correct usage with .y=0 creates consistent absolute Y positions")
     void testCalculatedYWithBaseY(ProgramContext ctx) {
-        System.out.println("\nDiamond blocks with calculated_y (WITH .base_y=0):");
+        System.out.println("\nDiamond blocks with calculated_y (WITH .y=0):");
         
         java.util.Set<Integer> allYPositions = new java.util.TreeSet<>();
         
@@ -1156,18 +1194,18 @@ final class ParserTest {
         }
         
         System.out.println("\nAll diamond Y positions across sections: " + allYPositions);
-        System.out.println("With .base_y=0, all diamonds appear at Y=62-66 (64±2) regardless of section!");
+        System.out.println("With .y=0, all diamonds appear at Y=62-66 (64±2) regardless of section!");
         
         // Verify diamonds only appear in the expected Y range (62-66)
         for (int y : allYPositions) {
             assertTrue(y >= 62 && y <= 66, 
-                "With .base_y=0, diamonds should be at Y=62-66, found at Y=" + y);
+                "With .y=0, diamonds should be at Y=62-66, found at Y=" + y);
         }
     }
 
     @PaintTest("""
             // Test the reported issue: noise2d returns fractional values that get used as Y coordinates
-            @noise .frequency=0.6 .seed=99999 .threshold=0.95 {
+            @noise2d .frequency=0.6 .seed=99999 .threshold=0.95 {
               terrain_noise = noise2d(x, z, 0.05, 31415)
               [0, terrain_noise, 0] stone
               
@@ -1212,7 +1250,7 @@ final class ParserTest {
 
     @PaintTest("""
             // Demonstrate proper usage: noise2d values must be scaled
-            @noise .frequency=1.0 .seed=11111 .threshold=0.90 .base_y=0 {
+            @noise2d .frequency=1.0 .seed=11111 .threshold=0.90 .y=0 {
               // Get noise value and scale it to useful range
               noise_val = noise2d(x, z, 0.1, 55555)
               y_offset = floor(noise_val * 8)  // Scale to -8..8 range

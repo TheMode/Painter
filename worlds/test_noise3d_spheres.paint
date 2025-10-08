@@ -1,4 +1,4 @@
-// Demonstrates the @noise occurrence with 3D sampling by scattering spheres using volumetric noise
-@noise .frequency=0.08 .seed=424242 .dimensions=3 .threshold=0.95 {
+// Demonstrates the @noise3d occurrence by scattering spheres using volumetric noise
+@noise3d .frequency=0.08 .seed=424242 .threshold=0.95 {
   #sphere .x=0 .y=0 .z=0 .radius=2 .block=glowstone
 }

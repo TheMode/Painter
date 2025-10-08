@@ -14,7 +14,8 @@ A declarative language for generating Minecraft worlds programmatically.
 - **Occurrences**: Pattern-based placement using noise and repetition
   - `@every` - Place blocks at regular intervals
   - `@section` - Place blocks once per section at a specific offset
-  - `@noise` - General-purpose noise-based placement (terrain, trees, features)
+  - `@noise2d` - 2D noise-based placement (terrain, trees, surface features)
+  - `@noise3d` - 3D noise-based placement (caves, volumetric features)
 
 ## Macro System
 
@@ -122,34 +123,32 @@ Place blocks once per section (16x16x16) at a specific offset within the section
 - Chunk-aligned features
 - Debug visualization
 
-### Noise Occurrence
+### Noise2D Occurrence
 
-General-purpose noise-based placement using FastNoiseLite. This single occurrence type can handle terrain generation, tree placement, and sparse feature distribution.
+2D noise sampling over the XZ plane, ideal for heightfields, surface decals, trees, and ores. Uses FastNoiseLite OpenSimplex2 under the hood.
 
 ```painter
-@noise(frequency, seed, [threshold], [amplitude], [base_y], [dimensions]) {
+@noise2d .frequency=0.02 .seed=12345 [.threshold=<0-1>] [.spread=<blocks>] [.y=<base_y>] {
   // Blocks to place
 }
 ```
 
 **Parameters:**
-- `frequency` - Controls pattern density/smoothness (0.01-0.2)
+- `.frequency` - Controls pattern density/smoothness (0.01-0.2)
   - Lower values (0.01-0.03): Smooth, large-scale terrain features
   - Higher values (0.1-0.2): Noisy, small-scale patterns
-- `seed` - Random seed for reproducible patterns
-- `threshold` - Optional (0-1). If provided, body only executes where noise > threshold
-  - Use to control sparsity: 0.7 = 30% coverage, 0.9 = 10% coverage
-- `amplitude` - Optional. Multiplies noise and adds to Y coordinate for terrain height
-- `base_y` - Optional. Base Y level when using amplitude (default 0)
-- `dimensions` - Optional. Defaults to 2; set to 3 to sample full 3D volume
+- `.seed` - Random seed for reproducible patterns
+- `.threshold` - Optional (0-1). Executes body only when noise >= threshold (use for sparsity)
+- `.spread` - Optional. Multiplies the noise value (-1..1) and adds it to the base Y
+- `.y` - Optional. Base Y level when using spread (defaults to the occurrence origin)
 
 **Usage Patterns:**
 
 #### Terrain Generation
-Use amplitude + base_y, omit or set threshold to 0:
+Use `.spread` + `.y`, omit threshold for full coverage:
 ```painter
 // Rolling hills varying ±16 blocks around y=64
-@noise(0.02, 12345, 0, 16, 64) {
+@noise2d .frequency=0.02 .seed=12345 .spread=16 .y=64 {
   [0, 0, 0] grass_block
   [0, -1, 0] dirt
   [0, -2, 0] stone
@@ -157,11 +156,10 @@ Use amplitude + base_y, omit or set threshold to 0:
 ```
 
 #### Trees on Terrain
-Use threshold for sparsity + amplitude to follow terrain:
+Use threshold for sparsity, spread for canopy alignment:
 ```painter
-// Trees on 30% of terrain, following height variations
-@noise(0.02, 12345, 0.7, 16, 65) {
-  // base_y=65 (terrain+1) places tree on top
+// Trees on ~30% of terrain, following height variations
+@noise2d .frequency=0.02 .seed=12345 .threshold=0.7 .spread=16 .y=65 {
   [0, 0, 0] oak_log
   [0, 1, 0] oak_log
   [0, 2, 0] oak_log
@@ -170,35 +168,26 @@ Use threshold for sparsity + amplitude to follow terrain:
 ```
 
 #### Sparse Feature Placement
-Use threshold only (no amplitude) for flat sparse placement:
+Threshold only for flat placement:
 ```painter
 // Flowers on 10% of area at y=64
-@noise(0.1, 12345, 0.9) {
+@noise2d .frequency=0.1 .seed=12345 .threshold=0.9 {
   [0, 64, 0] dandelion
 }
 ```
 
-#### Volumetric Scattering
-Sample 3D noise for floating clusters or cave features:
-```painter
-// Glowstone spheres scattered through a 3D volume
-@noise(0.08, 424242, 0.95, 0, 0, 3) {
-  #sphere .radius=2 .block=glowstone
-}
-```
-
 #### Complete Biome Example
-Layer multiple @noise occurrences with same seed but different thresholds:
+Layer multiple `@noise2d` ranges with the same seed:
 
 ```painter
 // Base terrain (full coverage)
-@noise(0.025, 77777, 0, 20, 64) {
+@noise2d .frequency=0.025 .seed=77777 .spread=20 .y=64 {
   [0, 0, 0] grass_block
   [0, -1, 0] dirt
 }
 
 // Trees (25% coverage, on terrain)
-@noise(0.025, 77777, 0.75, 20, 65) {
+@noise2d .frequency=0.025 .seed=77777 .threshold=0.75 .spread=20 .y=65 {
   [0, 0, 0] oak_log
   [0, 1, 0] oak_log
   [0, 2, 0] oak_log
@@ -208,12 +197,44 @@ Layer multiple @noise occurrences with same seed but different thresholds:
 }
 
 // Flowers (5% coverage, on terrain)
-@noise(0.025, 77777, 0.95, 20, 65) {
+@noise2d .frequency=0.025 .seed=77777 .threshold=0.95 .spread=20 .y=65 {
   [0, 0, 0] dandelion
 }
 ```
 
-**Pro Tip:** Use the same seed and amplitude across occurrences to ensure features align with the terrain height!
+**Pro Tip:** Reusing the same `.seed`, `.spread`, and `.y` keeps secondary features aligned with the underlying terrain.
+
+### Noise3D Occurrence
+
+3D noise sampling across entire sections, perfect for caves, volumetric decor, and scattered clusters.
+
+```painter
+@noise3d .frequency=0.08 .seed=424242 [.threshold=<0-1>] [.min_y=<min>] [.max_y=<max>] {
+  // Blocks to place
+}
+```
+
+**Parameters:**
+- `.frequency` - Controls volumetric feature size
+- `.seed` - Random seed for reproducible caves/features
+- `.threshold` - Optional (0-1). Executes body only when noise >= threshold; omit for full coverage
+- `.min_y` / `.max_y` - Optional inclusive world-height bounds to constrain sampling
+
+**Example:**
+```painter
+// Glowstone clusters suspended underground
+@noise3d .frequency=0.08 .seed=424242 .threshold=0.95 {
+  #sphere .radius=2 .block=glowstone
+}
+
+// Iron ore between y=16 and y=48
+@noise3d .frequency=0.12 .seed=11235 .threshold=0.78 .min_y=16 .max_y=48 {
+  [0, 0, 0] iron_ore
+  [1, 0, 0] iron_ore
+  [0, 1, 0] iron_ore
+  [0, 0, -1] iron_ore
+}
+```
 
 ## More Information
 

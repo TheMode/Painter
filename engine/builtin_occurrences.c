@@ -119,53 +119,44 @@ static void occurrence_every(ExecutionState *state, const NamedArgumentList *arg
   }
 }
 
-// @noise .frequency=<val> .seed=<val> [.dimensions=<2|3>] [.threshold=<val>] [.amplitude=<val>] [.base_y=<val>]
-// General-purpose noise occurrence for both 2D (heightfields) and 3D (volume scattering)
-// - dimensions: defaults to 2. When set to 3 the body is sampled across XYZ space.
+// @noise2d .frequency=<val> .seed=<val> [.threshold=<val>] [.spread=<val>] [.y=<val>]
+// 2D noise sampler that scans the XZ plane and executes the body at each anchor
 // - frequency: controls feature density/smoothness (e.g., 0.01-0.1)
 // - seed: random seed for reproducible patterns
-// - threshold: optional, if provided the body only executes if noise > threshold (0-1)
-// - amplitude: optional (2D mode only), scales vertical displacement around base_y
-// - base_y: optional base Y level when using amplitude (default 0)
+// - threshold: optional 0-1 cutoff; only run body when noise >= threshold
+// - spread: optional vertical displacement multiplier applied to the noise value
+// - y: optional base Y level (defaults to the origin)
 //
 // Usage examples:
-// @noise .frequency=0.05 .seed=12345 .threshold=0.7 { ... }              // Sparse placement (30% of area)
-// @noise .frequency=0.02 .seed=12345 .amplitude=16 .base_y=64 { ... }    // Terrain generation at y=64±16
-// @noise .frequency=0.04 .seed=424242 .dimensions=3 .threshold=0.95 { ... } // Volumetric scattering
-static void occurrence_noise(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y,
-    int origin_z, OccurrenceRuntime *runtime) {
+// @noise2d .frequency=0.05 .seed=12345 .threshold=0.7 { ... }                // Sparse surface placement
+// @noise2d .frequency=0.02 .seed=12345 .spread=16 .y=64 { ... }              // Terrain heightfield centered at y=64
+// @noise2d .frequency=0.1 .seed=98765 .spread=12 .y=32 .threshold=0.8 { ... } // Clustered ore veins
+static void occurrence_noise2d(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x,
+    int origin_y, int origin_z, OccurrenceRuntime *runtime) {
   if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
     return;
   }
-  void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
-  void *userdata = runtime->userdata;
 
-  // Get named arguments
   const Expression *frequency_expr = named_arg_get(args, "frequency");
   const Expression *seed_expr = named_arg_get(args, "seed");
-  const Expression *threshold_expr = named_arg_get(args, "threshold");
-  const Expression *amplitude_expr = named_arg_get(args, "amplitude");
-  const Expression *base_y_expr = named_arg_get(args, "base_y");
-  const Expression *dimensions_expr = named_arg_get(args, "dimensions");
-
   if (!frequency_expr || !seed_expr) {
-    return; // Missing required arguments
+    return;
   }
+
+  const Expression *threshold_expr = named_arg_get(args, "threshold");
+  const Expression *spread_expr = named_arg_get(args, "spread");
+  const Expression *y_expr = named_arg_get(args, "y");
 
   const float frequency = (float)eval_double_or(frequency_expr, state, 0.0);
   const int seed = eval_int_or(seed_expr, state, 0);
-  const float threshold = (float)eval_double_or(threshold_expr, state, -1.0);
-  const float amplitude = (float)eval_double_or(amplitude_expr, state, 0.0);
-  const int base_y_arg = eval_int_or(base_y_expr, state, 0);
-  const int dimensions = eval_int_or(dimensions_expr, state, 2);
+  const float threshold_value = (float)eval_double_or(threshold_expr, state, -1.0);
+  const float spread = (float)eval_double_or(spread_expr, state, 0.0);
+  const int base_y = eval_int_or(y_expr, state, origin_y);
 
-  // Check if base_y was explicitly provided
-  const bool has_base_y = base_y_expr != NULL;
-  const bool use_threshold = threshold_expr && threshold >= 0.0f;
-  const float threshold_cutoff = (threshold * 2.0f) - 1.0f;
-  const bool use_amplitude = amplitude_expr && amplitude != 0.0f;
+  const bool use_threshold = threshold_expr && threshold_value >= 0.0f;
+  const float threshold_cutoff = (threshold_value * 2.0f) - 1.0f;
+  const bool use_spread = spread_expr && spread != 0.0f;
 
-  // Initialize noise
   fnl_state noise = fnlCreateState();
   noise.seed = seed;
   noise.frequency = frequency;
@@ -173,61 +164,121 @@ static void occurrence_noise(ExecutionState *state, const NamedArgumentList *arg
 
   const int SEARCH_MARGIN = 16;
   const int base_x = runtime->base_x;
-  if (dimensions == 2) {
-    const int base_z = runtime->base_z;
+  const int base_z = runtime->base_z;
 
-    const int range_min_x = base_x - SEARCH_MARGIN;
-    const int range_max_x = base_x + 15 + SEARCH_MARGIN;
-    const int range_min_z = base_z - SEARCH_MARGIN;
-    const int range_max_z = base_z + 15 + SEARCH_MARGIN;
+  const int range_min_x = base_x - SEARCH_MARGIN;
+  const int range_max_x = base_x + 15 + SEARCH_MARGIN;
+  const int range_min_z = base_z - SEARCH_MARGIN;
+  const int range_max_z = base_z + 15 + SEARCH_MARGIN;
 
-    // Sample noise for each XZ coordinate
-    const int base_anchor_y = has_base_y ? base_y_arg : origin_y;
+  void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
+  void *userdata = runtime->userdata;
 
-    for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
+  for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
+    for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
+      const float noise_value = fnlGetNoise2D(&noise, (float)anchor_x, (float)anchor_z);
+
+      if (use_threshold && noise_value < threshold_cutoff) {
+        continue;
+      }
+
+      int anchor_y = base_y;
+      if (use_spread) {
+        anchor_y += (int)lroundf(noise_value * spread);
+      }
+
+      run_body(userdata, body, anchor_x, anchor_y, anchor_z);
+    }
+  }
+}
+
+// @noise3d .frequency=<val> .seed=<val> [.threshold=<val>] [.min_y=<val>] [.max_y=<val>]
+// 3D noise sampler that scans the full XYZ volume, useful for caves, fluids, etc.
+// - frequency: controls feature density/smoothness
+// - seed: random seed for reproducible patterns
+// - threshold: optional 0-1 cutoff; only run body when noise >= threshold
+// - min_y / max_y: optional inclusive world-height bounds to constrain sampling
+//
+// Usage examples:
+// @noise3d .frequency=0.08 .seed=424242 .threshold=0.95 { ... }               // Sparse cave pockets
+// @noise3d .frequency=0.12 .seed=11235 .min_y=24 .max_y=56 { ... }            // Ores across a vertical band
+static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x,
+    int origin_y, int origin_z, OccurrenceRuntime *runtime) {
+  if (!runtime || !runtime->run_body || !body || body->count == 0 || !args) {
+    return;
+  }
+
+  const Expression *frequency_expr = named_arg_get(args, "frequency");
+  const Expression *seed_expr = named_arg_get(args, "seed");
+  if (!frequency_expr || !seed_expr) {
+    return;
+  }
+
+  const Expression *threshold_expr = named_arg_get(args, "threshold");
+  const Expression *min_y_expr = named_arg_get(args, "min_y");
+  const Expression *max_y_expr = named_arg_get(args, "max_y");
+
+  const float frequency = (float)eval_double_or(frequency_expr, state, 0.0);
+  const int seed = eval_int_or(seed_expr, state, 0);
+  const float threshold_value = (float)eval_double_or(threshold_expr, state, -1.0);
+  const bool use_threshold = threshold_expr && threshold_value >= 0.0f;
+  const float threshold_cutoff = (threshold_value * 2.0f) - 1.0f;
+  const bool clamp_min_y = min_y_expr != NULL;
+  const bool clamp_max_y = max_y_expr != NULL;
+  const int min_y = clamp_min_y ? eval_int_or(min_y_expr, state, INT32_MIN) : INT32_MIN;
+  const int max_y = clamp_max_y ? eval_int_or(max_y_expr, state, INT32_MAX) : INT32_MAX;
+  if (clamp_min_y && clamp_max_y && min_y > max_y) {
+    return;
+  }
+
+  fnl_state noise = fnlCreateState();
+  noise.seed = seed;
+  noise.frequency = frequency;
+  noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
+
+  const int SEARCH_MARGIN = 16;
+  const int base_x = runtime->base_x;
+  const int base_y = runtime->base_y;
+  const int base_z = runtime->base_z;
+
+  const int range_min_x = base_x - SEARCH_MARGIN;
+  const int range_max_x = base_x + 15 + SEARCH_MARGIN;
+  int range_min_y = base_y - SEARCH_MARGIN;
+  int range_max_y = base_y + 15 + SEARCH_MARGIN;
+  const int range_min_z = base_z - SEARCH_MARGIN;
+  const int range_max_z = base_z + 15 + SEARCH_MARGIN;
+
+  if (clamp_min_y) {
+    const int min_bound = min_y - origin_y;
+    if (min_bound > range_min_y) {
+      range_min_y = min_bound;
+    }
+  }
+  if (clamp_max_y) {
+    const int max_bound = max_y - origin_y;
+    if (max_bound < range_max_y) {
+      range_max_y = max_bound;
+    }
+  }
+  if (range_min_y > range_max_y) {
+    return;
+  }
+
+  void (*run_body)(void *, const InstructionList *, int, int, int) = runtime->run_body;
+  void *userdata = runtime->userdata;
+
+  for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
+    for (int y = range_min_y, anchor_y = y + origin_y; y <= range_max_y; ++y, ++anchor_y) {
       for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
-        const float noise_value = fnlGetNoise2D(&noise, (float)anchor_x, (float)anchor_z);
+        const float noise_value = fnlGetNoise3D(&noise, (float)anchor_x, (float)anchor_y, (float)anchor_z);
 
         if (use_threshold && noise_value < threshold_cutoff) {
           continue;
         }
 
-        int anchor_y = base_anchor_y;
-        if (use_amplitude) {
-          anchor_y += (int)lroundf(noise_value * amplitude);
-        }
-
         run_body(userdata, body, anchor_x, anchor_y, anchor_z);
       }
     }
-    return;
-  }
-
-  if (dimensions == 3) {
-    const int runtime_base_y = runtime->base_y;
-    const int base_z = runtime->base_z;
-
-    const int range_min_x = base_x - SEARCH_MARGIN;
-    const int range_max_x = base_x + 15 + SEARCH_MARGIN;
-    const int range_min_y = runtime_base_y - SEARCH_MARGIN;
-    const int range_max_y = runtime_base_y + 15 + SEARCH_MARGIN;
-    const int range_min_z = base_z - SEARCH_MARGIN;
-    const int range_max_z = base_z + 15 + SEARCH_MARGIN;
-
-    for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
-      for (int y = range_min_y, anchor_y = y + origin_y; y <= range_max_y; ++y, ++anchor_y) {
-        for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
-          const float noise_value = fnlGetNoise3D(&noise, (float)anchor_x, (float)anchor_y, (float)anchor_z);
-
-          if (use_threshold && noise_value < threshold_cutoff) {
-            continue;
-          }
-
-          run_body(userdata, body, anchor_x, anchor_y, anchor_z);
-        }
-      }
-    }
-    return;
   }
 }
 
@@ -262,7 +313,8 @@ static void occurrence_section(ExecutionState *state, const NamedArgumentList *a
 
 const BuiltinOccurrence BUILTIN_OCCURRENCES[] = {
     {"every", occurrence_every},
-    {"noise", occurrence_noise},
+    {"noise2d", occurrence_noise2d},
+    {"noise3d", occurrence_noise3d},
     {"section", occurrence_section},
 };
 

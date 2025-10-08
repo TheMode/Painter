@@ -44,7 +44,7 @@ repeat {
   [1, 0] oak_planks
 }
 
-tree = @noise .frequency=0.6 .seed=12345 .threshold=0.95
+tree = @noise2d .frequency=0.6 .seed=12345 .threshold=0.95
 tree {
   // trunk (centered at occurrence origin)
   [0, 0, 0] oak_log

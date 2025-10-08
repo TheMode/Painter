@@ -14,7 +14,7 @@ diamond_base_y = bedrock_layers + 12
 diamond_spread = 8
 
 // Terrain
-@noise .frequency=0.05 .seed=31415 .amplitude=2 .base_y=ground_height {
+@noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
   #column .y=-ground_height .height=bedrock_layers .block=bedrock
   #column .y=-(ground_height - bedrock_layers) .height=stone_layers .block=stone
   #column .y=-dirt_layers .height=dirt_layers .block=dirt
@@ -22,7 +22,7 @@ diamond_spread = 8
 }
 
 // Trees
-@noise .frequency=0.6 .seed=99999 .threshold=0.98 .base_y=0 {
+@noise2d .frequency=0.6 .seed=99999 .threshold=0.98 .y=0 {
   terrain_noise = noise2d(x, z, 0.05, 31415)
   tree_base_y = ground_height + round(terrain_noise * 2)
   
@@ -38,28 +38,28 @@ diamond_spread = 8
 }
 
 // Ores
-@noise .frequency=0.18 .seed=27182 .threshold=0.75 .amplitude=coal_spread .base_y=coal_base_y {
+@noise3d .frequency=0.18 .seed=27182 .threshold=0.75 .min_y=coal_base_y-coal_spread .max_y=coal_base_y+coal_spread {
   [0, 0, 0] coal_ore
   [1, 0, 0] coal_ore
   [0, 1, 0] coal_ore
   [0, 0, 1] coal_ore
 }
 
-@noise .frequency=0.16 .seed=11235 .threshold=0.78 .amplitude=iron_spread .base_y=iron_base_y {
+@noise3d .frequency=0.16 .seed=11235 .threshold=0.78 .min_y=iron_base_y-iron_spread .max_y=iron_base_y+iron_spread {
   [0, 0, 0] iron_ore
   [1, 0, 0] iron_ore
   [0, 1, 0] iron_ore
   [0, 0, -1] iron_ore
 }
 
-@noise .frequency=0.12 .seed=44332 .threshold=0.8 .amplitude=gold_spread .base_y=gold_base_y {
+@noise3d .frequency=0.12 .seed=44332 .threshold=0.8 .min_y=gold_base_y-gold_spread .max_y=gold_base_y+gold_spread {
   [0, 0, 0] gold_ore
   [0, 1, 0] gold_ore
   [-1, 0, 0] gold_ore
   [0, 0, 1] gold_ore
 }
 
-@noise .frequency=0.09 .seed=88775 .threshold=0.82 .amplitude=diamond_spread .base_y=diamond_base_y {
+@noise3d .frequency=0.09 .seed=88775 .threshold=0.82 .min_y=diamond_base_y-diamond_spread .max_y=diamond_base_y+diamond_spread {
   [0, 0, 0] diamond_ore
   [0, 1, 0] diamond_ore
   [1, 0, 0] diamond_ore
@@ -67,6 +67,6 @@ diamond_spread = 8
 }
 
 // Caves
-@noise .frequency=0.09 .seed=424242 .dimensions=3 .threshold=0.55 {
+@noise3d .frequency=0.09 .seed=424242 .threshold=0.55 {
   [0, 0, 0] air
 }
