@@ -4,8 +4,8 @@ ground_height = 64
 bedrock_layers = 5
 dirt_layers = 3
 stone_layers = ground_height - bedrock_layers - dirt_layers
-coal_base_y = ground_height - 12
-coal_spread = 10
+coal_base_y = ground_height - 18
+coal_spread = 8
 iron_base_y = ground_height - 24
 iron_spread = 12
 gold_base_y = ground_height - 32
@@ -14,7 +14,7 @@ diamond_base_y = bedrock_layers + 12
 diamond_spread = 8
 
 // Terrain
-@noise2d .frequency=0.05 .seed=31415 .spread=2 .y=ground_height {
+@noise2d .frequency=0.05 .seed=31415 .spread=5 .y=ground_height {
   #column .y=-ground_height .height=bedrock_layers .block=bedrock
   #column .y=-(ground_height - bedrock_layers) .height=stone_layers .block=stone
   #column .y=-dirt_layers .height=dirt_layers .block=dirt
@@ -24,7 +24,7 @@ diamond_spread = 8
 // Trees
 @noise2d .frequency=0.6 .seed=99999 .threshold=0.98 .y=0 {
   terrain_noise = noise2d(x, z, 0.05, 31415)
-  tree_base_y = ground_height + round(terrain_noise * 2)
+  tree_base_y = ground_height + round(terrain_noise * 5)
   
   // Trunk
   #column .y=tree_base_y+1 .height=3 .block=oak_log
@@ -67,6 +67,6 @@ diamond_spread = 8
 }
 
 // Caves
-@noise3d .frequency=0.09 .seed=424242 .threshold=0.55 {
+@noise3d .frequency=0.09 .seed=424242 .threshold=0.72 {
   [0, 0, 0] air
 }
