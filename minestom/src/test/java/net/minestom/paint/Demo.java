@@ -1,5 +1,9 @@
 package net.minestom.paint;
 
+import me.tongfei.progressbar.DelegatingProgressBarConsumer;
+import me.tongfei.progressbar.ProgressBar;
+import me.tongfei.progressbar.ProgressBarBuilder;
+import me.tongfei.progressbar.ProgressBarStyle;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.minestom.server.MinecraftServer;
@@ -100,13 +104,26 @@ public final class Demo {
         experience.notifyReloadSuccess("initial program");
 
         final int chunkCount = ChunkRange.chunksCount(ServerFlag.CHUNK_VIEW_DISTANCE);
-        LOGGER.info("Pre-loading {} chunks around spawn (this may take a while)", chunkCount);
+        LOGGER.info("Pre-loading {} chunks around spawn", chunkCount);
         List<CompletableFuture<Chunk>> futures = new ArrayList<>();
         ChunkRange.chunksInRange(SPAWN_POS, ServerFlag.CHUNK_VIEW_DISTANCE, (chunkX, chunkZ) -> {
             futures.add(instance.loadChunk(chunkX, chunkZ));
         });
         long startNanos = System.nanoTime();
-        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+
+        try (ProgressBar pb = new ProgressBarBuilder()
+                .setTaskName("Loading chunks")
+                .setInitialMax(futures.size())
+                .setStyle(ProgressBarStyle.ASCII)
+                .setConsumer(new DelegatingProgressBarConsumer(LOGGER::info))
+                .build()) {
+
+            for (CompletableFuture<Chunk> future : futures) {
+                future.thenRun(pb::step);
+            }
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+        }
+
         long elapsedNanos = System.nanoTime() - startNanos;
         int loaded = futures.size();
         long avgNanosPerChunk = loaded > 0 ? (elapsedNanos / loaded) : 0L;

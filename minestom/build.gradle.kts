@@ -18,6 +18,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // Demo server dependencies (test-only)
     testImplementation("ch.qos.logback:logback-classic:1.5.19")
+    testImplementation("me.tongfei:progressbar:0.10.1")
 }
 
 tasks.withType<Test> {
