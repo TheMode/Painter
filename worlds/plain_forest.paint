@@ -24,3 +24,8 @@ ground_height = 64
   [0 tree_base_y+4 1] oak_leaves
   [0 tree_base_y+5 0] oak_leaves
 }
+
+// Caves
+@noise .frequency=0.09 .seed=424242 .dimensions=3 .threshold=0.55 {
+  [0 0 0] air
+}

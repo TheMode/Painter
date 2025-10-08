@@ -1,4 +1,4 @@
-package net.minestom.paint.demo;
+package net.minestom.paint;
 
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;

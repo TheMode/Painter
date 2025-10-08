@@ -1,10 +1,7 @@
-package net.minestom.paint.demo;
+package net.minestom.paint;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.minestom.paint.GeneratorReloader;
-import net.minestom.paint.PaintFileWatcher;
-import net.minestom.paint.PaintGenerator;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.ServerFlag;
 import net.minestom.server.command.CommandManager;
@@ -49,7 +46,7 @@ public final class Demo {
     private Demo() {
     }
 
-    static void main(String[] args) throws IOException {
+    static void main() throws IOException {
         MinecraftServer server = MinecraftServer.init();
         DemoConfig config = loadConfig();
 
@@ -108,8 +105,31 @@ public final class Demo {
         ChunkRange.chunksInRange(SPAWN_POS, ServerFlag.CHUNK_VIEW_DISTANCE, (chunkX, chunkZ) -> {
             futures.add(instance.loadChunk(chunkX, chunkZ));
         });
+        long startNanos = System.nanoTime();
         CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
-        LOGGER.info("Pre-loaded {} chunks around spawn", futures.size());
+        long elapsedNanos = System.nanoTime() - startNanos;
+        int loaded = futures.size();
+        long avgNanosPerChunk = loaded > 0 ? (elapsedNanos / loaded) : 0L;
+        LOGGER.info("Pre-loaded {} chunks around spawn in {} (avg {} per chunk)", loaded,
+                formatDuration(elapsedNanos), formatDuration(avgNanosPerChunk));
+    }
+
+    private static String formatDuration(long nanos) {
+        if (nanos >= 60L * 1_000_000_000L) {
+            double mins = nanos / 1_000_000_000.0 / 60.0;
+            return String.format("%.2f min", mins);
+        } else if (nanos >= 1_000_000_000L) {
+            double secs = nanos / 1_000_000_000.0;
+            return String.format("%.2f s", secs);
+        } else if (nanos >= 1_000_000L) {
+            double ms = nanos / 1_000_000.0;
+            return String.format("%.2f ms", ms);
+        } else if (nanos >= 1_000L) {
+            double us = nanos / 1_000.0;
+            return String.format("%.2f us", us);
+        } else {
+            return nanos + " ns";
+        }
     }
 
     private static PaintFileWatcher setupFileWatcher(InstanceContainer instance, DemoConfig config, PainterExperience experience) {
@@ -177,9 +197,7 @@ public final class Demo {
 
     private static void registerShutdownHooks(PaintFileWatcher watcher, PainterExperience experience) {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            if (watcher != null) {
-                watcher.close();
-            }
+            if (watcher != null) watcher.close();
             experience.close();
         }));
     }
@@ -188,7 +206,12 @@ public final class Demo {
         OpenToLAN.open(new OpenToLANConfig().eventCallDelay(Duration.of(1, TimeUnit.DAY)));
     }
 
-    private record DemoConfig(Path paintFile, boolean enableFileWatcher, boolean enableLoadCommands,
-                              String bindAddress, int port, int maxPlayers) {
+    private record DemoConfig(
+            Path paintFile,
+            boolean enableFileWatcher,
+            boolean enableLoadCommands,
+            String bindAddress, int port,
+            int maxPlayers
+    ) {
     }
 }

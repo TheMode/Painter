@@ -1,7 +1,5 @@
-package net.minestom.paint.demo;
+package net.minestom.paint;
 
-import net.minestom.paint.GeneratorReloader;
-import net.minestom.paint.PaintUrlLoader;
 import net.minestom.server.command.builder.Command;
 import net.minestom.server.command.builder.arguments.ArgumentType;
 import net.minestom.server.command.builder.arguments.ArgumentWord;
