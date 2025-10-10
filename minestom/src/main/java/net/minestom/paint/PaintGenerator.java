@@ -7,6 +7,7 @@ import net.minestom.server.instance.generator.GenerationUnit;
 import net.minestom.server.instance.generator.Generator;
 import net.minestom.server.instance.palette.Palette;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.foreign.MemorySegment;
 
@@ -28,36 +29,15 @@ public final class PaintGenerator implements Generator {
     @Override
     public void generate(GenerationUnit unit) {
         for (Vec section : unit.sections()) {
-            final int sectionX = section.blockX();
-            final int sectionY = section.blockY();
-            final int sectionZ = section.blockZ();
+            final int sectionX = section.blockX(), sectionY = section.blockY(), sectionZ = section.blockZ();
 
             // Generate section data from the painter program
             PainterParser.SectionData sectionData = PainterParser.generateSection(
                     program, sectionX, sectionY, sectionZ
             );
 
-            // Get palette and data array
-            final String[] palette = sectionData.palette();
-            final long[] data = sectionData.data();
-            final int bitsPerEntry = sectionData.bitsPerEntry();
-
-            if (data.length == 0) {
-                // Empty section, skip
-                continue;
-            }
-
-            // Convert to block state ids
-            int[] blockStateIds = new int[palette.length];
-            for (int i = 0; i < palette.length; i++) {
-                Block block = Block.fromState(palette[i]);
-                if (block == null) continue; // Invalid block state
-                blockStateIds[i] = block.stateId();
-            }
-
-            Palette blocks = Palette.blocks(bitsPerEntry);
-            blocks.load(blockStateIds, data);
-
+            Palette blocks = generatePalette(sectionData);
+            if (blocks == null) continue;
             blocks.getAllPresent((x, y, z, value) -> {
                 final Block block = Block.fromStateId(value);
                 assert block != null;
@@ -67,6 +47,29 @@ public final class PaintGenerator implements Generator {
                 unit.modifier().setBlock(globalX, globalY, globalZ, block);
             });
         }
+    }
+
+    private static @Nullable Palette generatePalette(PainterParser.SectionData sectionData) {
+        // Get palette and data array
+        final String[] palette = sectionData.palette();
+        final long[] data = sectionData.data();
+        final int bitsPerEntry = sectionData.bitsPerEntry();
+        if (data.length == 0) {
+            // Empty section, skip
+            return null;
+        }
+
+        // Convert to block state ids
+        int[] blockStateIds = new int[palette.length];
+        for (int i = 0; i < palette.length; i++) {
+            Block block = Block.fromState(palette[i]);
+            if (block == null) continue; // Invalid block state
+            blockStateIds[i] = block.stateId();
+        }
+
+        Palette blocks = Palette.blocks(bitsPerEntry);
+        blocks.load(blockStateIds, data);
+        return blocks;
     }
 
     public void close() {

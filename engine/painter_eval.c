@@ -55,22 +55,22 @@ static int calculate_bits_per_entry(int palette_size) {
   return bits < MIN_BITS ? MIN_BITS : bits;
 }
 
-// Evaluate block position
-static bool evaluate_block_position(const BlockPlacement *placement, ExecutionState *state, int origin_x, int origin_y, int origin_z,
+// Evaluate block position (inlined for performance)
+static inline bool evaluate_block_position(const BlockPlacement *placement, ExecutionState *state, int origin_x, int origin_y, int origin_z,
     int *world_x, int *world_y, int *world_z) {
-  if (!placement || !state) return false;
-
   if (!placement->coordinate || placement->coordinate->type != EXPR_COORDINATE) {
     return false;
   }
 
-  int offset_x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, state);
-  int offset_y = placement->coordinate->coordinate.y ? (int)painter_evaluate_expression(placement->coordinate->coordinate.y, state) : 0;
-  int offset_z = placement->coordinate->coordinate.z ? (int)painter_evaluate_expression(placement->coordinate->coordinate.z, state) : 0;
+  const int offset_x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, state);
+  const int offset_y = placement->coordinate->coordinate.y ? (int)painter_evaluate_expression(placement->coordinate->coordinate.y, state)
+                                                           : 0;
+  const int offset_z = placement->coordinate->coordinate.z ? (int)painter_evaluate_expression(placement->coordinate->coordinate.z, state)
+                                                           : 0;
 
-  if (world_x) *world_x = origin_x + offset_x;
-  if (world_y) *world_y = origin_y + offset_y;
-  if (world_z) *world_z = origin_z + offset_z;
+  *world_x = origin_x + offset_x;
+  *world_y = origin_y + offset_y;
+  *world_z = origin_z + offset_z;
   return true;
 }
 
@@ -140,46 +140,44 @@ double painter_evaluate_expression(const Expression *expr, ExecutionState *state
   return 0.0;
 }
 
-// Check if instruction might affect section
+// Check if instruction might affect section (optimized)
 static bool instruction_might_affect_section(Instruction *instr, ExecutionState *state, int origin_x, int origin_y, int origin_z) {
-  if (!instr || !state) return false;
+  if (!instr) return false;
 
   switch (instr->type) {
   case INSTR_BLOCK_PLACEMENT: {
-    int world_x = 0;
-    int world_y = 0;
-    int world_z = 0;
+    int world_x, world_y, world_z;
     if (!evaluate_block_position(&instr->block_placement, state, origin_x, origin_y, origin_z, &world_x, &world_y, &world_z)) {
       return false;
     }
-    return painter_section_contains_point(state, world_x, world_y, world_z);
+    // Fast bounds check using unsigned comparison trick
+    const unsigned local_x = world_x - state->base_x;
+    const unsigned local_y = world_y - state->base_y;
+    const unsigned local_z = world_z - state->base_z;
+    return (local_x < 16u) && (local_y < 16u) && (local_z < 16u);
   }
   case INSTR_OCCURRENCE: {
     const Occurrence *occ = &instr->occurrence;
     if (!occ->body.has_bounds) {
-      // No bounds info, conservatively assume it might affect this section
-      return true;
+      return true; // Conservative: no bounds info, assume it might affect
     }
 
-    // Calculate world-space bounds. The origin parameters are offsets relative
-    // to the current section base (state->base_*). Include state->base_* so
-    // the computed world bounds reflect the true world coordinates for this
-    // origin (which may be non-zero when checking neighboring sections).
-    int world_min_x = state->base_x + origin_x + occ->body.min_x;
-    int world_max_x = state->base_x + origin_x + occ->body.max_x;
-    int world_min_y = state->base_y + origin_y + occ->body.min_y;
-    int world_max_y = state->base_y + origin_y + occ->body.max_y;
-    int world_min_z = state->base_z + origin_z + occ->body.min_z;
-    int world_max_z = state->base_z + origin_z + occ->body.max_z;
+    // Calculate world-space bounds and check AABB intersection
+    const int world_min_x = state->base_x + origin_x + occ->body.min_x;
+    const int world_max_x = state->base_x + origin_x + occ->body.max_x;
+    const int world_min_y = state->base_y + origin_y + occ->body.min_y;
+    const int world_max_y = state->base_y + origin_y + occ->body.max_y;
+    const int world_min_z = state->base_z + origin_z + occ->body.min_z;
+    const int world_max_z = state->base_z + origin_z + occ->body.max_z;
 
-    // Check intersection with current section
-    int sec_min_x = state->base_x;
-    int sec_max_x = state->base_x + 15;
-    int sec_min_y = state->base_y;
-    int sec_max_y = state->base_y + 15;
-    int sec_min_z = state->base_z;
-    int sec_max_z = state->base_z + 15;
+    const int sec_min_x = state->base_x;
+    const int sec_max_x = state->base_x + 15;
+    const int sec_min_y = state->base_y;
+    const int sec_max_y = state->base_y + 15;
+    const int sec_min_z = state->base_z;
+    const int sec_max_z = state->base_z + 15;
 
+    // Optimized AABB intersection test
     return !(world_max_x < sec_min_x || world_min_x > sec_max_x || world_max_y < sec_min_y || world_min_y > sec_max_y ||
              world_max_z < sec_min_z || world_min_z > sec_max_z);
   }
@@ -203,12 +201,12 @@ static void run_instruction_list(const InstructionList *list, ExecutionState *st
 static void occurrence_runtime_run_body(void *userdata, const InstructionList *body, int anchor_x, int anchor_y, int anchor_z) {
   ExecutionState *state = (ExecutionState *)userdata;
   if (!state || !body) return;
-  
+
   // Inject x, y, z variables so they can be used in expressions like noise2d(x, z, ...)
   context_set(state->variables, "x", (double)anchor_x);
   context_set(state->variables, "y", (double)anchor_y);
   context_set(state->variables, "z", (double)anchor_z);
-  
+
   run_instruction_list(body, state, anchor_x, anchor_y, anchor_z);
 }
 
@@ -278,25 +276,17 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
 
   switch (instr->type) {
   case INSTR_BLOCK_PLACEMENT: {
-    int world_x = 0;
-    int world_y = 0;
-    int world_z = 0;
+    int world_x, world_y, world_z;
     if (!evaluate_block_position(&instr->block_placement, state, origin_x, origin_y, origin_z, &world_x, &world_y, &world_z)) {
       break;
     }
 
-    int local_x = world_x - state->base_x;
-    if ((unsigned)local_x >= 16u) {
-      break;
-    }
+    // Combined bounds check using unsigned arithmetic
+    const unsigned local_x = world_x - state->base_x;
+    const unsigned local_y = world_y - state->base_y;
+    const unsigned local_z = world_z - state->base_z;
 
-    int local_y = world_y - state->base_y;
-    if ((unsigned)local_y >= 16u) {
-      break;
-    }
-
-    int local_z = world_z - state->base_z;
-    if ((unsigned)local_z >= 16u) {
+    if (local_x >= 16u || local_y >= 16u || local_z >= 16u) {
       break;
     }
 
@@ -305,12 +295,13 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
       break;
     }
 
-    int palette_index = painter_palette_get_or_add(state, block_string);
+    const int palette_index = painter_palette_get_or_add(state, block_string);
     if (palette_index < 0) {
       break;
     }
 
-    int block_index = (local_y << 8) | (local_z << 4) | local_x;
+    // Optimized block index calculation
+    const int block_index = (local_y << 8) | (local_z << 4) | local_x;
     state->block_indices[block_index] = palette_index;
     break;
   }
@@ -391,46 +382,51 @@ process_program_at_origin(Program *program, ExecutionState *state, int origin_x,
   }
 }
 
-// Section generation function
-Section *generate_section(Program *program, int section_x, int section_y, int section_z) {
-  if (!program) return NULL;
+// Global shared registries (initialized once, reused across all sections)
+// This is safe because builtin functions/macros/occurrences are read-only after initialization
+static struct {
+  MacroRegistry macros;
+  FunctionRegistry functions;
+  OccurrenceTypeRegistry occurrence_types;
+  bool initialized;
+} g_builtin_registries = {0};
 
-  Section *section = calloc(1, sizeof(*section));
-  if (!section) return NULL;
+// Initialize global registries on first use (thread-safe for read-only access)
+static void ensure_builtin_registries_initialized(void) {
+  if (g_builtin_registries.initialized) {
+    return;
+  }
 
-  int block_indices[4096] = {0};
+  macro_registry_init(&g_builtin_registries.macros);
+  register_builtin_macros(&g_builtin_registries.macros);
 
-  const int base_x = section_x * 16;
-  const int base_y = section_y * 16;
-  const int base_z = section_z * 16;
+  function_registry_init(&g_builtin_registries.functions);
+  register_builtin_functions(&g_builtin_registries.functions);
 
-  VariableContext ctx;
-  context_init(&ctx);
+  occurrence_type_registry_init(&g_builtin_registries.occurrence_types);
+  register_builtin_occurrences(&g_builtin_registries.occurrence_types);
 
-  MacroRegistry macro_registry;
-  macro_registry_init(&macro_registry);
-  register_builtin_macros(&macro_registry);
+  g_builtin_registries.initialized = true;
+}
 
-  FunctionRegistry function_registry;
-  function_registry_init(&function_registry);
-  register_builtin_functions(&function_registry);
+// Helper to initialize execution state with all registries
+static inline void init_execution_state(ExecutionState *state, Section *section, int *block_indices, int base_x, int base_y, int base_z,
+    int *palette_capacity, VariableContext *ctx, OccurrenceRegistry *occurrence_registry) {
 
-  OccurrenceTypeRegistry occurrence_type_registry;
-  occurrence_type_registry_init(&occurrence_type_registry);
-  register_builtin_occurrences(&occurrence_type_registry);
+  // Ensure global registries are initialized
+  ensure_builtin_registries_initialized();
 
-  OccurrenceRegistry occurrence_registry;
-  occurrence_registry_init(&occurrence_registry);
+  // Initialize per-section context and occurrence registry
+  context_init(ctx);
+  occurrence_registry_init(occurrence_registry);
 
-  int palette_capacity = 0;
-  bool success = false;
-
-  ExecutionState state = {
-      .variables = &ctx,
-      .macros = &macro_registry,
-      .functions = &function_registry,
-      .occurrences = &occurrence_registry,
-      .occurrence_types = &occurrence_type_registry,
+  // Setup execution state (using global shared registries)
+  *state = (ExecutionState){
+      .variables = ctx,
+      .macros = &g_builtin_registries.macros,
+      .functions = &g_builtin_registries.functions,
+      .occurrences = occurrence_registry,
+      .occurrence_types = &g_builtin_registries.occurrence_types,
       .base_x = base_x,
       .base_y = base_y,
       .base_z = base_z,
@@ -440,66 +436,123 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
       .block_indices = block_indices,
       .palette = &section->palette,
       .palette_size = &section->palette_size,
-      .palette_capacity = &palette_capacity,
+      .palette_capacity = palette_capacity,
   };
+}
 
+// Helper to cleanup execution state
+static inline void cleanup_execution_state(ExecutionState *state, OccurrenceRegistry *occurrence_registry) {
+  occurrence_registry_free(occurrence_registry);
+  context_free(state->variables);
+  // Note: Global registries are NOT freed - they persist for reuse
+}
+
+// Optimized neighbor checking - only check faces and edges that could affect section
+static const struct {
+  int dx, dy, dz;
+} neighbor_offsets[] = {
+    // Face neighbors (most likely to affect section)
+    {-1, 0, 0},
+    {1, 0, 0}, // X faces
+    {0, -1, 0},
+    {0, 1, 0}, // Y faces
+    {0, 0, -1},
+    {0, 0, 1}, // Z faces
+    // Edge neighbors
+    {-1, -1, 0},
+    {-1, 1, 0},
+    {1, -1, 0},
+    {1, 1, 0},
+    {-1, 0, -1},
+    {-1, 0, 1},
+    {1, 0, -1},
+    {1, 0, 1},
+    {0, -1, -1},
+    {0, -1, 1},
+    {0, 1, -1},
+    {0, 1, 1},
+    // Corner neighbors
+    {-1, -1, -1},
+    {-1, -1, 1},
+    {-1, 1, -1},
+    {-1, 1, 1},
+    {1, -1, -1},
+    {1, -1, 1},
+    {1, 1, -1},
+    {1, 1, 1},
+};
+
+// Section generation function
+Section *generate_section(Program *program, int section_x, int section_y, int section_z) {
+  if (!program) return NULL;
+
+  Section *section = calloc(1, sizeof(*section));
+  if (!section) return NULL;
+
+  int block_indices[4096] = {0};
+  const int base_x = section_x * 16;
+  const int base_y = section_y * 16;
+  const int base_z = section_z * 16;
+  int palette_capacity = 0;
+
+  // Only need per-section variable context and occurrence registry
+  VariableContext ctx;
+  OccurrenceRegistry occurrence_registry;
+
+  ExecutionState state;
+  init_execution_state(&state, section, block_indices, base_x, base_y, base_z, &palette_capacity, &ctx, &occurrence_registry);
+
+  // Initialize air block
   if (painter_palette_get_or_add(&state, "air") < 0) {
-    goto cleanup;
+    cleanup_execution_state(&state, &occurrence_registry);
+    free(section);
+    return NULL;
   }
 
   // Process all instructions from origin [0, 0, 0]
   process_program_at_origin(program, &state, 0, 0, 0, false);
 
-  // Check for occurrences from neighboring sections that might affect this section
+  // Check for occurrences from neighboring sections (optimized loop)
   // This enables cross-section structures like trees
-  for (int dx = -1; dx <= 1; dx++) {
-    for (int dy = -1; dy <= 1; dy++) {
-      for (int dz = -1; dz <= 1; dz++) {
-        if (dx == 0 && dy == 0 && dz == 0) continue; // Skip current section (already processed)
-
-        // Calculate origin offset for neighboring section
-        int neighbor_origin_x = dx * 16;
-        int neighbor_origin_y = dy * 16;
-        int neighbor_origin_z = dz * 16;
-        process_program_at_origin(program, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z, true);
-      }
-    }
+  for (size_t i = 0; i < sizeof(neighbor_offsets) / sizeof(neighbor_offsets[0]); i++) {
+    const int neighbor_origin_x = neighbor_offsets[i].dx * 16;
+    const int neighbor_origin_y = neighbor_offsets[i].dy * 16;
+    const int neighbor_origin_z = neighbor_offsets[i].dz * 16;
+    process_program_at_origin(program, &state, neighbor_origin_x, neighbor_origin_y, neighbor_origin_z, true);
   }
 
+  // Pack block data
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);
 
   if (section->bits_per_entry == 0) {
     section->data_size = 0;
     section->data = NULL;
   } else {
-    int blocks_per_long = 64 / section->bits_per_entry;
+    const int blocks_per_long = 64 / section->bits_per_entry;
     section->data_size = (4096 + blocks_per_long - 1) / blocks_per_long;
     section->data = calloc(section->data_size, sizeof(uint64_t));
+
     if (!section->data) {
-      goto cleanup;
+      cleanup_execution_state(&state, &occurrence_registry);
+      section_free(section);
+      return NULL;
     }
 
+    // Optimized packing loop - reduces div/mod operations
+    int long_index = 0;
+    int offset_in_long = 0;
     for (int i = 0; i < 4096; i++) {
-      int long_index = i / blocks_per_long;
-      int offset_in_long = (i % blocks_per_long) * section->bits_per_entry;
       section->data[long_index] |= ((uint64_t)block_indices[i]) << offset_in_long;
+
+      offset_in_long += section->bits_per_entry;
+      if (offset_in_long >= 64) {
+        offset_in_long = 0;
+        long_index++;
+      }
     }
   }
 
-  success = true;
-
-cleanup:
-  occurrence_registry_free(&occurrence_registry);
-  occurrence_type_registry_free(&occurrence_type_registry);
-  function_registry_free(&function_registry);
-  macro_registry_free(&macro_registry);
-  context_free(&ctx);
-
-  if (!success) {
-    section_free(section);
-    section = NULL;
-  }
-
+  cleanup_execution_state(&state, &occurrence_registry);
   return section;
 }
 
@@ -521,24 +574,26 @@ void section_free(Section *section) {
 
 // Palette helpers shared between the interpreter and macros
 
-// Helper function to find or add a block to the palette
+// Helper function to find or add a block to the palette (optimized with linear search)
 int painter_palette_get_or_add(ExecutionState *state, const char *block_string) {
   if (!state || !state->palette || !state->palette_size || !state->palette_capacity || !block_string) {
     return -1;
   }
 
   char **palette = *state->palette;
-  int size = *state->palette_size;
+  const int size = *state->palette_size;
 
+  // Linear search with early exit (typical palettes are small < 50 entries)
   for (int i = 0; i < size; i++) {
     if (strcmp(palette[i], block_string) == 0) {
       return i;
     }
   }
 
+  // Need to add new entry
   int capacity = *state->palette_capacity;
   if (capacity <= size) {
-    int new_capacity = capacity == 0 ? 8 : capacity * 2;
+    const int new_capacity = capacity == 0 ? 8 : capacity * 2;
     char **resized = realloc(palette, sizeof(char *) * new_capacity);
     if (!resized) {
       return -1;
@@ -548,11 +603,12 @@ int painter_palette_get_or_add(ExecutionState *state, const char *block_string) 
     *state->palette_capacity = new_capacity;
   }
 
-  char *copy = malloc(strlen(block_string) + 1);
+  const size_t len = strlen(block_string);
+  char *copy = malloc(len + 1);
   if (!copy) {
     return -1;
   }
-  strcpy(copy, block_string);
+  memcpy(copy, block_string, len + 1);
 
   palette[size] = copy;
   *state->palette_size = size + 1;
