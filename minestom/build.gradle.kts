@@ -11,7 +11,7 @@ repositories {
 
 dependencies {
     implementation(project(":core"))
-    implementation("net.minestom:minestom:2025.10.05-1.21.8")
+    implementation("net.minestom:minestom:2025.10.11-1.21.10")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
