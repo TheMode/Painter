@@ -75,6 +75,68 @@ static bool eval_coordinate_argument(const Expression *expr, ExecutionState *sta
   return true;
 }
 
+static bool eval_positive_component_or_default(const Expression *expr, ExecutionState *state, int default_value, int *out_value) {
+  if (!out_value) {
+    return false;
+  }
+  if (!expr) {
+    if (default_value <= 0) {
+      return false;
+    }
+    *out_value = default_value;
+    return true;
+  }
+  const double value = painter_evaluate_expression(expr, state);
+  if (!isfinite(value)) {
+    return false;
+  }
+  const long long rounded = llround(value);
+  if (rounded <= 0) {
+    return false;
+  }
+  *out_value = (int)rounded;
+  return true;
+}
+
+static bool eval_positive_vector3(const Expression *expr, ExecutionState *state, int default_y, int default_z, int *out_x, int *out_y, int *out_z) {
+  if (!expr || !out_x || !out_y || !out_z) {
+    return false;
+  }
+
+  const Expression *x_expr = expr;
+  const Expression *y_expr = NULL;
+  const Expression *z_expr = NULL;
+
+  if (expr->type == EXPR_COORDINATE) {
+    x_expr = expr->coordinate.x;
+    y_expr = expr->coordinate.y;
+    z_expr = expr->coordinate.z;
+  }
+
+  if (!x_expr) {
+    return false;
+  }
+
+  if (!eval_positive_component_or_default(x_expr, state, -1, out_x)) {
+    return false;
+  }
+  if (!eval_positive_component_or_default(y_expr, state, default_y, out_y)) {
+    return false;
+  }
+  if (!eval_positive_component_or_default(z_expr, state, default_z, out_z)) {
+    return false;
+  }
+  return true;
+}
+
+static inline bool is_on_spacing(int value, int spacing) {
+  if (spacing <= 0) {
+    return false;
+  }
+  const int mod = value % spacing;
+  return mod == 0;
+}
+
 static void draw_line(ExecutionState *state, int x0, int y0, int z0, int x1, int y1, int z1, int palette_index) {
   int dx = abs(x1 - x0);
   int dy = abs(y1 - y0);
@@ -461,11 +523,102 @@ void builtin_macro_column(ExecutionState *state, const NamedArgumentList *args) 
   }
 }
 
+// Lattice macro: #lattice .size=[dx, dy, dz] .spacing=[sx, sy, sz] .block=<block_name>
+// Optional offsets via .origin=[x, y, z] or .x/.y/.z
+void builtin_macro_lattice(ExecutionState *state, const NamedArgumentList *args) {
+  if (!state || !args) {
+    return;
+  }
+
+  Expression *block_expr = named_arg_get(args, "block");
+  const Expression *size_expr = named_arg_get(args, "size");
+  const Expression *spacing_expr = named_arg_get(args, "spacing");
+  if (!block_expr || !size_expr || !spacing_expr) {
+    return;
+  }
+
+  int size_x = 0;
+  int size_y = 0;
+  int size_z = 0;
+  if (!eval_positive_vector3(size_expr, state, 1, 1, &size_x, &size_y, &size_z)) {
+    return;
+  }
+
+  int spacing_x = 0;
+  int spacing_y = 0;
+  int spacing_z = 0;
+  if (!eval_positive_vector3(spacing_expr, state, 1, 1, &spacing_x, &spacing_y, &spacing_z)) {
+    return;
+  }
+
+  const int palette_index = add_block_to_palette(state, block_expr);
+  if (palette_index < 0) {
+    return;
+  }
+
+  int origin_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
+  int origin_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
+  int origin_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+
+  const Expression *origin_expr = named_arg_get(args, "origin");
+  if (origin_expr) {
+    if (!eval_coordinate_argument(origin_expr, state, &origin_x, &origin_y, &origin_z)) {
+      return;
+    }
+  }
+
+  const int max_x = origin_x + size_x - 1;
+  const int max_y = origin_y + size_y - 1;
+  const int max_z = origin_z + size_z - 1;
+
+  PainterAABB bounds = {
+      .min_x = origin_x,
+      .max_x = max_x,
+      .min_y = origin_y,
+      .max_y = max_y,
+      .min_z = origin_z,
+      .max_z = max_z,
+  };
+
+  if (!painter_section_clip_aabb(state, &bounds)) {
+    return;
+  }
+
+  const int section_min_x = state->base_x;
+  const int section_min_y = state->base_y;
+  const int section_min_z = state->base_z;
+
+  for (int world_y = bounds.min_y; world_y <= bounds.max_y; ++world_y) {
+    const int local_y = world_to_local(world_y, section_min_y);
+    const int y_offset = local_y * 256;
+    const int rel_y = world_y - origin_y;
+    const bool y_align = (rel_y == 0) || (rel_y == size_y - 1) || is_on_spacing(rel_y, spacing_y);
+    for (int world_z = bounds.min_z; world_z <= bounds.max_z; ++world_z) {
+      const int local_z = world_to_local(world_z, section_min_z);
+      const int base_index = y_offset + local_z * 16;
+      const int rel_z = world_z - origin_z;
+      const bool z_align = (rel_z == 0) || (rel_z == size_z - 1) || is_on_spacing(rel_z, spacing_z);
+      for (int world_x = bounds.min_x; world_x <= bounds.max_x; ++world_x) {
+        const int rel_x = world_x - origin_x;
+        const bool x_align = (rel_x == 0) || (rel_x == size_x - 1) || is_on_spacing(rel_x, spacing_x);
+        const bool place_block = (x_align && y_align) || (x_align && z_align) || (y_align && z_align);
+        if (!place_block) {
+          continue;
+        }
+
+        const int local_x = world_to_local(world_x, section_min_x);
+        state->block_indices[base_index + local_x] = palette_index;
+      }
+    }
+  }
+}
+
 const BuiltinMacro BUILTIN_MACROS[] = {
     {"sphere", builtin_macro_sphere},
     {"cuboid", builtin_macro_cuboid},
     {"line", builtin_macro_line},
     {"column", builtin_macro_column},
+    {"lattice", builtin_macro_lattice},
 };
 
 const int BUILTIN_MACROS_COUNT = sizeof(BUILTIN_MACROS) / sizeof(BuiltinMacro);

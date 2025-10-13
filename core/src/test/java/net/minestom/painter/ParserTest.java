@@ -106,10 +106,10 @@ final class ParserTest {
                           angle = y * spirals * 6.28 / tower_height
                           x = radius * cos(angle)
                           z = radius * sin(angle)
-
+                        
                           // Rainbow colors based on height
                           color_index = (y * 16) / tower_height
-
+                        
                           // Different blocks at different heights
                           if(y < tower_height / 3) {
                             [x, y, z] red_concrete
@@ -119,14 +119,14 @@ final class ParserTest {
                             [x, y, z] blue_concrete
                           }
                         }
-
+                        
                         // Add a base platform
                         for x in -10..10 {
                           for z in -10..10 {
                             [x, -1, z] stone
                           }
                         }
-
+                        
                         // Place a beacon on top
                         [0, tower_height, 0] beacon
                         """),
@@ -149,7 +149,7 @@ final class ParserTest {
                           [0, 0, 0] grass_block
                           [0, -1, 0] dirt
                         }
-
+                        
                         // Add trees with threshold for sparsity, same terrain height
                         @noise2d .frequency=0.025 .seed=77777 .threshold=0.75 .spread=20 .y=70 {
                           [0, 1, 0] oak_log
@@ -263,7 +263,7 @@ final class ParserTest {
             #line .from=[0, 3, 0] .to=[3, 6, 3] .block=copper_block
             """)
     @DisplayName("#line macro draws axis-aligned, diagonal, and cross-section segments")
-   void testLineMacro(ProgramContext ctx) {
+    void testLineMacro(ProgramContext ctx) {
         PainterParser.SectionData section0 = ctx.generateSection(0, 0, 0);
         PainterParser.SectionData section1 = ctx.generateSection(1, 0, 0);
 
@@ -361,6 +361,37 @@ final class ParserTest {
         for (int localY = 0; localY < 16; localY++) {
             assertBlockAt(lowerSection, 1, localY, 0, "gold_block");
         }
+    }
+
+    @PaintTest("""
+            #lattice .size=[5, 5, 5] .spacing=[2, 3, 2] .block=iron_block
+            #lattice .x=14 .size=[4, 4, 4] .spacing=[2, 2, 2] .block=oak_log
+            #lattice .origin=[0, 8, 0] .size=[2, 2, 2] .spacing=[1, 1, 1] .block=gold_block
+            """)
+    @DisplayName("#lattice macro builds 3D grids with spacing, offsets, and custom origins")
+    void testLatticeMacro(ProgramContext ctx) {
+        PainterParser.SectionData section0 = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData section1 = ctx.generateSection(1, 0, 0);
+
+        assertPaletteContains(section0, "iron_block", "oak_log", "gold_block", "air");
+        assertPaletteContains(section1, "oak_log", "air");
+
+        // Primary lattice at origin
+        assertBlockAt(section0, 0, 0, 0, "iron_block");
+        assertBlockAt(section0, 4, 4, 4, "iron_block");
+        assertBlockAt(section0, 2, 3, 2, "iron_block");
+        assertBlockAt(section0, 1, 1, 1, "air");
+
+        // Lattice shifted across section boundary via .x offset
+        assertBlockAt(section0, 14, 0, 0, "oak_log");
+        assertBlockAt(section0, 15, 1, 1, "air");
+        assertBlockAt(section1, 0, 0, 0, "oak_log");
+        assertBlockAt(section1, 0, 2, 2, "oak_log");
+        assertBlockAt(section1, 1, 1, 1, "air");
+
+        // Compact lattice using explicit origin
+        assertBlockAt(section0, 0, 8, 0, "gold_block");
+        assertBlockAt(section0, 1, 9, 1, "gold_block");
     }
 
     @PaintTest("""
@@ -797,11 +828,11 @@ final class ParserTest {
         // With ground_height=64, amplitude=2, noise places anchors at y=62-66.
         // Column with y=-5, height=2 should place 2 blocks starting at (62-66)+(-5) = 57-61.
         // Expected: 2 blocks at each noise point (e.g., at y=59,60 when anchor is at y=64).
-        
+
         // Generate section 3 (base_y = 48, covers y=48-63) where stones appear
         PainterParser.SectionData section3 = ctx.generateSection(0, 3, 0);
         assertPaletteContains(section3, "stone", "air");
-        
+
         // The test primarily verifies that generation completes without hanging,
         // and that the correct number of blocks is placed (2, not 3).
     }
@@ -815,7 +846,7 @@ final class ParserTest {
     void testNoise2dFunction(ProgramContext ctx) {
         PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
         assertPaletteContains(section, "stone", "air");
-        
+
         // Just verify the function call doesn't crash and a block is placed
         assertBlockAt(section, 5, 0, 0, "stone");
     }
@@ -829,7 +860,7 @@ final class ParserTest {
     void testNoise3dFunction(ProgramContext ctx) {
         PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
         assertPaletteContains(section, "gold_block", "air");
-        
+
         // Just verify the function call doesn't crash and a block is placed
         assertBlockAt(section, 5, 0, 0, "gold_block");
     }
@@ -852,10 +883,10 @@ final class ParserTest {
               // Calculate terrain height at this position using the same noise as terrain generation
               terrain_noise = noise2d(x, z, 0.05, 31415)
               tree_base_y = ground_height + floor(terrain_noise * 2)
-              
+            
               // Place tree trunk starting at the grass surface + 1
               #column .y=tree_base_y+1 .height=3 .block=oak_log
-              
+            
               // Place leaves at the top of the trunk
               [-1, tree_base_y+4, 0] oak_leaves
               [1, tree_base_y+4, 0] oak_leaves
@@ -868,14 +899,14 @@ final class ParserTest {
     void testPlainForestWithNoiseFunction(ProgramContext ctx) {
         // Generate multiple sections to test terrain and tree generation
         PainterParser.SectionData section4 = ctx.generateSection(0, 4, 0);
-        
+
         // Verify palette contains expected blocks
         assertPaletteContains(section4, "grass_block");
-        
+
         // If trees spawned in this section, verify they exist
-        boolean hasTreeBlocks = paletteIndex(section4, "oak_log") >= 0 || 
-                                paletteIndex(section4, "oak_leaves") >= 0;
-        
+        boolean hasTreeBlocks = paletteIndex(section4, "oak_log") >= 0 ||
+                paletteIndex(section4, "oak_leaves") >= 0;
+
         // Just verify generation completes successfully
         // (the exact tree positions depend on noise threshold)
         assertNotNull(section4, "Section should generate successfully");
@@ -894,15 +925,15 @@ final class ParserTest {
     void testTerrainHeightWithNoise(ProgramContext ctx) {
         // Section 4 covers world Y 64-79, which is where ground_height=64 terrain should be
         PainterParser.SectionData section4 = ctx.generateSection(0, 4, 0);
-        
+
         assertPaletteContains(section4, "grass_block", "dirt");
-        
+
         // Check that grass and dirt exist at reasonable positions
         // With spread=2 and y=64, terrain should be at Y 62-66
         // In section 4 (Y 64-79), this means local Y 0-2
         boolean foundGrass = false;
         boolean foundDirt = false;
-        
+
         for (int y = 0; y < 4; y++) {
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
@@ -916,7 +947,7 @@ final class ParserTest {
                 }
             }
         }
-        
+
         assertTrue(foundGrass, "Should find grass blocks in terrain");
         assertTrue(foundDirt, "Should find dirt blocks below grass");
     }
@@ -935,7 +966,7 @@ final class ParserTest {
               // Calculate terrain height at this XZ position
               terrain_noise = noise2d(x, z, 0.05, 31415)
               tree_base_y = ground_height + floor(terrain_noise * 2)
-              
+            
               // Place a diamond marker at the calculated position
               [0, tree_base_y, 0] emerald_block
               [0, tree_base_y+1, 0] diamond_block
@@ -944,12 +975,12 @@ final class ParserTest {
     @DisplayName("Markers placed with calculated Y match terrain when using y=0")
     void testCalculatedTerrainHeightWithBaseY(ProgramContext ctx) {
         PainterParser.SectionData section4 = ctx.generateSection(0, 4, 0);
-        
+
         // If we got any markers placed, verify they're on top of grass
         int diamondIdx = paletteIndex(section4, "diamond_block");
         int emeraldIdx = paletteIndex(section4, "emerald_block");
         int grassIdx = paletteIndex(section4, "grass_block");
-        
+
         if (diamondIdx >= 0 && emeraldIdx >= 0) {
             // Find diamond blocks and check if emerald (grass level) is below
             for (int x = 0; x < 16; x++) {
@@ -959,13 +990,13 @@ final class ParserTest {
                         if (blockIdx == diamondIdx) {
                             int blockBelow = blockIndex(section4, x, y - 1, z);
                             assertEquals(emeraldIdx, blockBelow,
-                                "Diamond at (" + x + "," + (64+y) + "," + z + ") should have emerald below");
+                                    "Diamond at (" + x + "," + (64 + y) + "," + z + ") should have emerald below");
                         }
                     }
                 }
             }
         }
-        
+
         // Just verify the test runs successfully
         assertTrue(true, "Test verifies coordinate system with base_y=0");
     }
@@ -989,11 +1020,11 @@ final class ParserTest {
               // Calculate terrain height at this XZ position using the same noise as terrain generation
               terrain_noise = noise2d(x, z, 0.05, 31415)
               tree_base_y = ground_height + floor(terrain_noise * 2)
-              
+            
               // Place tree trunk starting at the grass surface + 1
               // Since anchor is at Y=0, we use absolute Y coordinates
               #column .y=tree_base_y+1 .height=3 .block=oak_log
-              
+            
               // Place leaves at the top of the trunk (absolute Y coordinates)
               [-1, tree_base_y+4, 0] oak_leaves
               [1, tree_base_y+4, 0] oak_leaves
@@ -1006,17 +1037,17 @@ final class ParserTest {
     void testPlainForestWithCorrectTreePlacement(ProgramContext ctx) {
         // Generate multiple sections to test terrain and tree generation
         PainterParser.SectionData section4 = ctx.generateSection(0, 4, 0);
-        
+
         // Verify palette contains expected blocks
         assertPaletteContains(section4, "grass_block", "dirt");
-        
+
         int grassIdx = paletteIndex(section4, "grass_block");
         int logIdx = paletteIndex(section4, "oak_log");
-        
+
         // If trees spawned, verify oak_log blocks are placed above grass
         if (logIdx >= 0) {
             boolean foundCorrectTree = false;
-            
+
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
                     for (int y = 1; y < 15; y++) {
@@ -1027,19 +1058,19 @@ final class ParserTest {
                             int blockBelow = blockIndex(section4, x, y - 1, z);
                             if (blockBelow == grassIdx) {
                                 foundCorrectTree = true;
-                                System.out.println("Found correct tree placement: oak_log at (" + 
-                                    x + "," + (64+y) + "," + z + ") with grass at (" + 
-                                    x + "," + (64+y-1) + "," + z + ")");
+                                System.out.println("Found correct tree placement: oak_log at (" +
+                                        x + "," + (64 + y) + "," + z + ") with grass at (" +
+                                        x + "," + (64 + y - 1) + "," + z + ")");
                             }
                         }
                     }
                 }
             }
-            
-            assertTrue(foundCorrectTree, 
-                "At least one tree should be placed directly above grass blocks");
+
+            assertTrue(foundCorrectTree,
+                    "At least one tree should be placed directly above grass blocks");
         }
-        
+
         // Verify generation completes successfully
         assertNotNull(section4, "Section should generate successfully");
     }
@@ -1066,13 +1097,13 @@ final class ParserTest {
     @DisplayName("Calculated Y from noise2d matches actual terrain height")
     void testCalculatedTerrainHeight(ProgramContext ctx) {
         PainterParser.SectionData section4 = ctx.generateSection(0, 4, 0);
-        
+
         assertPaletteContains(section4, "grass_block", "diamond_block");
-        
+
         // Find the diamond block position
         int diamondIdx = paletteIndex(section4, "diamond_block");
         int grassIdx = paletteIndex(section4, "grass_block");
-        
+
         // Debug: print all grass positions
         System.out.println("Grass blocks in section 4:");
         for (int x = 0; x < 16; x++) {
@@ -1088,12 +1119,12 @@ final class ParserTest {
                 }
             }
         }
-        
+
         // The issue: grass is placed at [0, 0, 0] RELATIVE to each noise sample point
         // So grass appears at various XZ positions based on where noise samples
         // But the diamond is placed at absolute [8, calculated_y+1, 8]
         // These are not the same system!
-        
+
         // For now, just verify both blocks exist (we'll fix the logic separately)
         assertTrue(true, "Test demonstrates the coordinate system mismatch");
     }
@@ -1109,17 +1140,17 @@ final class ParserTest {
     @DisplayName("Test calculated_y with floor and scaling - demonstrates coordinate system issue")
     void testCalculatedYWithFloor(ProgramContext ctx) {
         System.out.println("Stone blocks with calculated_y (WITHOUT .y=0):");
-        
+
         java.util.Map<Integer, java.util.List<String>> stonesBySection = new java.util.TreeMap<>();
-        
+
         for (int sectionY = 2; sectionY <= 5; sectionY++) {
             PainterParser.SectionData section = ctx.generateSection(0, sectionY, 0);
             int stoneIdx = paletteIndex(section, "stone");
-            
+
             if (stoneIdx >= 0) {
                 int baseY = sectionY * 16;
                 System.out.println("Section Y=" + sectionY + " (origin_y=" + baseY + ", covers world Y " + baseY + " to " + (baseY + 15) + "):");
-                
+
                 java.util.Set<Integer> yPositions = new java.util.TreeSet<>();
                 for (int x = 0; x < 16; x++) {
                     for (int z = 0; z < 16; z++) {
@@ -1138,17 +1169,17 @@ final class ParserTest {
                 }
             }
         }
-        
+
         // The issue: coordinates are RELATIVE to origin_y
         // calculated_y = 64, but placed at origin_y + 64
         // Section 2 (origin_y=32): stones at 32+64 = ~96? No, at 48 because of wrapping
         // Section 3 (origin_y=48): stones at 48+64 = 112? No, wraps around
         // Section 4 (origin_y=64): stones at 64+64 = 128? No, wraps around
-        
+
         System.out.println("\nSummary: Stones appear at different absolute Y per section!");
         System.out.println("This is because coordinates are RELATIVE to origin_y");
         System.out.println("Solution: Use .y=0 to make coordinates absolute");
-        
+
         assertTrue(true, "Test demonstrates coordinate system issue");
     }
 
@@ -1163,17 +1194,17 @@ final class ParserTest {
     @DisplayName("Correct usage with .y=0 creates consistent absolute Y positions")
     void testCalculatedYWithBaseY(ProgramContext ctx) {
         System.out.println("\nDiamond blocks with calculated_y (WITH .y=0):");
-        
+
         java.util.Set<Integer> allYPositions = new java.util.TreeSet<>();
-        
+
         for (int sectionY = 2; sectionY <= 5; sectionY++) {
             PainterParser.SectionData section = ctx.generateSection(0, sectionY, 0);
             int diamondIdx = paletteIndex(section, "diamond_block");
-            
+
             if (diamondIdx >= 0) {
                 int baseY = sectionY * 16;
                 System.out.println("Section Y=" + sectionY + " (origin_y=" + baseY + ", covers world Y " + baseY + " to " + (baseY + 15) + "):");
-                
+
                 java.util.Set<Integer> yPositions = new java.util.TreeSet<>();
                 for (int x = 0; x < 16; x++) {
                     for (int z = 0; z < 16; z++) {
@@ -1192,14 +1223,14 @@ final class ParserTest {
                 }
             }
         }
-        
+
         System.out.println("\nAll diamond Y positions across sections: " + allYPositions);
         System.out.println("With .y=0, all diamonds appear at Y=62-66 (64±2) regardless of section!");
-        
+
         // Verify diamonds only appear in the expected Y range (62-66)
         for (int y : allYPositions) {
-            assertTrue(y >= 62 && y <= 66, 
-                "With .y=0, diamonds should be at Y=62-66, found at Y=" + y);
+            assertTrue(y >= 62 && y <= 66,
+                    "With .y=0, diamonds should be at Y=62-66, found at Y=" + y);
         }
     }
 
@@ -1208,7 +1239,7 @@ final class ParserTest {
             @noise2d .frequency=0.6 .seed=99999 .threshold=0.95 {
               terrain_noise = noise2d(x, z, 0.05, 31415)
               [0, terrain_noise, 0] stone
-              
+            
               // Also test what happens when we scale it
               scaled_noise = terrain_noise * 10
               [1, scaled_noise, 0] gold_block
@@ -1222,7 +1253,7 @@ final class ParserTest {
             PainterParser.SectionData section = ctx.generateSection(0, sectionY, 0);
             int stoneIdx = paletteIndex(section, "stone");
             int goldIdx = paletteIndex(section, "gold_block");
-            
+
             if (stoneIdx >= 0 || goldIdx >= 0) {
                 System.out.println("Section Y=" + sectionY + " (world Y " + (sectionY * 16) + " to " + (sectionY * 16 + 15) + "):");
                 for (int x = 0; x < 16; x++) {
@@ -1241,7 +1272,7 @@ final class ParserTest {
                 }
             }
         }
-        
+
         // The issue: noise2d returns values in range -1 to 1 (fractional)
         // When used directly as Y coordinate, these get truncated to 0
         // Solution: Always scale noise values before using as coordinates
@@ -1254,7 +1285,7 @@ final class ParserTest {
               // Get noise value and scale it to useful range
               noise_val = noise2d(x, z, 0.1, 55555)
               y_offset = floor(noise_val * 8)  // Scale to -8..8 range
-              
+            
               // Place at absolute world Y = 64 + offset
               [0, 64+y_offset, 0] emerald_block
             }
@@ -1262,7 +1293,7 @@ final class ParserTest {
     @DisplayName("Properly scaled noise2d values create varied Y positions")
     void testScaledNoise2dValues(ProgramContext ctx) {
         PainterParser.SectionData section4 = ctx.generateSection(0, 4, 0);
-        
+
         int emeraldIdx = paletteIndex(section4, "emerald_block");
         if (emeraldIdx >= 0) {
             // Collect all Y positions where emeralds appear
@@ -1277,13 +1308,13 @@ final class ParserTest {
                     }
                 }
             }
-            
+
             System.out.println("Emerald Y positions: " + yPositions);
-            
+
             // With proper scaling, we should see variety in Y positions
             // Not just all at one Y level
-            assertTrue(yPositions.size() > 1, 
-                "Scaled noise should produce varied Y positions, found: " + yPositions);
+            assertTrue(yPositions.size() > 1,
+                    "Scaled noise should produce varied Y positions, found: " + yPositions);
         }
     }
 }
