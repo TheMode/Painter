@@ -28,107 +28,6 @@ static void write_block_if_visible(ExecutionState *state, int world_x, int world
   state->block_indices[index] = palette_index;
 }
 
-static int eval_offset(const Expression *expr, ExecutionState *state) { return expr ? (int)painter_evaluate_expression(expr, state) : 0; }
-
-static bool eval_positive_extent(const Expression *expr, ExecutionState *state, int *out_extent) {
-  if (!expr || !out_extent) {
-    return false;
-  }
-
-  const double value = painter_evaluate_expression(expr, state);
-  if (!isfinite(value) || value <= 0.0) {
-    return false;
-  }
-
-  const long long rounded = llround(value);
-  if (rounded <= 0) {
-    return false;
-  }
-
-  *out_extent = (int)rounded;
-  return true;
-}
-
-static bool eval_boolean_flag(const Expression *expr, ExecutionState *state) {
-  if (!expr) {
-    return false;
-  }
-  return painter_evaluate_expression(expr, state) != 0.0;
-}
-
-static bool eval_coordinate_argument(const Expression *expr, ExecutionState *state, int *out_x, int *out_y, int *out_z) {
-  if (!expr || !state || !out_x || !out_y || !out_z) {
-    return false;
-  }
-
-  if (expr->type != EXPR_COORDINATE || !expr->coordinate.x) {
-    return false;
-  }
-
-  const double x_val = painter_evaluate_expression(expr->coordinate.x, state);
-  const double y_val = expr->coordinate.y ? painter_evaluate_expression(expr->coordinate.y, state) : 0.0;
-  const double z_val = expr->coordinate.z ? painter_evaluate_expression(expr->coordinate.z, state) : 0.0;
-
-  *out_x = state->current_origin_x + (int)llround(x_val);
-  *out_y = state->current_origin_y + (int)llround(y_val);
-  *out_z = state->current_origin_z + (int)llround(z_val);
-  return true;
-}
-
-static bool eval_positive_component_or_default(const Expression *expr, ExecutionState *state, int default_value, int *out_value) {
-  if (!out_value) {
-    return false;
-  }
-  if (!expr) {
-    if (default_value <= 0) {
-      return false;
-    }
-    *out_value = default_value;
-    return true;
-  }
-  const double value = painter_evaluate_expression(expr, state);
-  if (!isfinite(value)) {
-    return false;
-  }
-  const long long rounded = llround(value);
-  if (rounded <= 0) {
-    return false;
-  }
-  *out_value = (int)rounded;
-  return true;
-}
-
-static bool eval_positive_vector3(const Expression *expr, ExecutionState *state, int default_y, int default_z, int *out_x, int *out_y, int *out_z) {
-  if (!expr || !out_x || !out_y || !out_z) {
-    return false;
-  }
-
-  const Expression *x_expr = expr;
-  const Expression *y_expr = NULL;
-  const Expression *z_expr = NULL;
-
-  if (expr->type == EXPR_COORDINATE) {
-    x_expr = expr->coordinate.x;
-    y_expr = expr->coordinate.y;
-    z_expr = expr->coordinate.z;
-  }
-
-  if (!x_expr) {
-    return false;
-  }
-
-  if (!eval_positive_component_or_default(x_expr, state, -1, out_x)) {
-    return false;
-  }
-  if (!eval_positive_component_or_default(y_expr, state, default_y, out_y)) {
-    return false;
-  }
-  if (!eval_positive_component_or_default(z_expr, state, default_z, out_z)) {
-    return false;
-  }
-  return true;
-}
-
 static inline bool is_on_spacing(int value, int spacing) {
   if (spacing <= 0) {
     return false;
@@ -216,9 +115,9 @@ void builtin_macro_sphere(ExecutionState *state, const NamedArgumentList *args) 
   const int palette_index = add_block_to_palette(state, block_expr);
   if (palette_index < 0) return;
 
-  const int center_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
-  const int center_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
-  const int center_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+  const int center_x = state->current_origin_x + painter_eval_offset(named_arg_get(args, "x"), state);
+  const int center_y = state->current_origin_y + painter_eval_offset(named_arg_get(args, "y"), state);
+  const int center_z = state->current_origin_z + painter_eval_offset(named_arg_get(args, "z"), state);
 
   if (radius == 0) {
     write_block_if_visible(state, center_x, center_y, center_z, palette_index);
@@ -298,8 +197,8 @@ void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) 
     int to_x = 0;
     int to_y = 0;
     int to_z = 0;
-    if (!eval_coordinate_argument(from_expr, state, &from_x, &from_y, &from_z) ||
-        !eval_coordinate_argument(to_expr, state, &to_x, &to_y, &to_z)) {
+    if (!painter_eval_coordinate_argument(from_expr, state, &from_x, &from_y, &from_z) ||
+        !painter_eval_coordinate_argument(to_expr, state, &to_x, &to_y, &to_z)) {
       return;
     }
 
@@ -317,15 +216,15 @@ void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) 
     int height = 0;
     int depth = 0;
 
-    if (!eval_positive_extent(named_arg_get(args, "width"), state, &width) ||
-        !eval_positive_extent(named_arg_get(args, "height"), state, &height) ||
-        !eval_positive_extent(named_arg_get(args, "depth"), state, &depth)) {
+    if (!painter_eval_positive_extent(named_arg_get(args, "width"), state, &width) ||
+        !painter_eval_positive_extent(named_arg_get(args, "height"), state, &height) ||
+        !painter_eval_positive_extent(named_arg_get(args, "depth"), state, &depth)) {
       return;
     }
 
-    const int origin_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
-    const int origin_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
-    const int origin_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+    const int origin_x = state->current_origin_x + painter_eval_offset(named_arg_get(args, "x"), state);
+    const int origin_y = state->current_origin_y + painter_eval_offset(named_arg_get(args, "y"), state);
+    const int origin_z = state->current_origin_z + painter_eval_offset(named_arg_get(args, "z"), state);
 
     min_x = origin_x;
     min_y = origin_y;
@@ -348,7 +247,7 @@ void builtin_macro_cuboid(ExecutionState *state, const NamedArgumentList *args) 
     return;
   }
 
-  const bool hollow = eval_boolean_flag(named_arg_get(args, "hollow"), state);
+  const bool hollow = painter_eval_boolean_flag(named_arg_get(args, "hollow"), state);
 
   const int section_min_x = state->base_x;
   const int section_min_y = state->base_y;
@@ -393,14 +292,14 @@ void builtin_macro_line(ExecutionState *state, const NamedArgumentList *args) {
   int start_x = 0;
   int start_y = 0;
   int start_z = 0;
-  if (!eval_coordinate_argument(from_expr, state, &start_x, &start_y, &start_z)) {
+  if (!painter_eval_coordinate_argument(from_expr, state, &start_x, &start_y, &start_z)) {
     return;
   }
 
   int end_x = 0;
   int end_y = 0;
   int end_z = 0;
-  if (!eval_coordinate_argument(to_expr, state, &end_x, &end_y, &end_z)) {
+  if (!painter_eval_coordinate_argument(to_expr, state, &end_x, &end_y, &end_z)) {
     return;
   }
 
@@ -446,9 +345,9 @@ void builtin_macro_column(ExecutionState *state, const NamedArgumentList *args) 
     return;
   }
 
-  const int start_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
-  const int start_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
-  const int start_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+  const int start_x = state->current_origin_x + painter_eval_offset(named_arg_get(args, "x"), state);
+  const int start_y = state->current_origin_y + painter_eval_offset(named_arg_get(args, "y"), state);
+  const int start_z = state->current_origin_z + painter_eval_offset(named_arg_get(args, "z"), state);
 
   const Expression *to_expr = named_arg_get(args, "to");
   const Expression *height_expr = named_arg_get(args, "height");
@@ -540,14 +439,14 @@ void builtin_macro_lattice(ExecutionState *state, const NamedArgumentList *args)
   int size_x = 0;
   int size_y = 0;
   int size_z = 0;
-  if (!eval_positive_vector3(size_expr, state, 1, 1, &size_x, &size_y, &size_z)) {
+  if (!painter_eval_positive_vector3(size_expr, state, 1, 1, &size_x, &size_y, &size_z)) {
     return;
   }
 
   int spacing_x = 0;
   int spacing_y = 0;
   int spacing_z = 0;
-  if (!eval_positive_vector3(spacing_expr, state, 1, 1, &spacing_x, &spacing_y, &spacing_z)) {
+  if (!painter_eval_positive_vector3(spacing_expr, state, 1, 1, &spacing_x, &spacing_y, &spacing_z)) {
     return;
   }
 
@@ -556,13 +455,13 @@ void builtin_macro_lattice(ExecutionState *state, const NamedArgumentList *args)
     return;
   }
 
-  int origin_x = state->current_origin_x + eval_offset(named_arg_get(args, "x"), state);
-  int origin_y = state->current_origin_y + eval_offset(named_arg_get(args, "y"), state);
-  int origin_z = state->current_origin_z + eval_offset(named_arg_get(args, "z"), state);
+  int origin_x = state->current_origin_x + painter_eval_offset(named_arg_get(args, "x"), state);
+  int origin_y = state->current_origin_y + painter_eval_offset(named_arg_get(args, "y"), state);
+  int origin_z = state->current_origin_z + painter_eval_offset(named_arg_get(args, "z"), state);
 
   const Expression *origin_expr = named_arg_get(args, "origin");
   if (origin_expr) {
-    if (!eval_coordinate_argument(origin_expr, state, &origin_x, &origin_y, &origin_z)) {
+    if (!painter_eval_coordinate_argument(origin_expr, state, &origin_x, &origin_y, &origin_z)) {
       return;
     }
   }

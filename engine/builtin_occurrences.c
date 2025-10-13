@@ -59,23 +59,16 @@ static bool compute_iteration_bounds(int step, int range_min, int range_max, int
   return true;
 }
 
-static double eval_double_or(const Expression *expr, ExecutionState *state, double fallback) {
-  return expr ? painter_evaluate_expression(expr, state) : fallback;
-}
-
-static int eval_int_or(const Expression *expr, ExecutionState *state, int fallback) {
-  return (int)llround(eval_double_or(expr, state, (double)fallback));
-}
-
 static void occurrence_every(ExecutionState *state, const NamedArgumentList *args, const InstructionList *body, int origin_x, int origin_y,
+
     int origin_z, OccurrenceRuntime *runtime) {
   if (!runtime || !body || body->count == 0 || !args) {
     return;
   }
 
-  const int step_x = eval_int_or(named_arg_get(args, "x"), state, 0);
-  const int step_y = eval_int_or(named_arg_get(args, "y"), state, 0);
-  const int step_z = eval_int_or(named_arg_get(args, "z"), state, 0);
+  const int step_x = painter_eval_int_or(named_arg_get(args, "x"), state, 0);
+  const int step_y = painter_eval_int_or(named_arg_get(args, "y"), state, 0);
+  const int step_z = painter_eval_int_or(named_arg_get(args, "z"), state, 0);
 
   const int SEARCH_MARGIN = 16;
   const int base_x = runtime->base_x;
@@ -147,11 +140,11 @@ static void occurrence_noise2d(ExecutionState *state, const NamedArgumentList *a
   const Expression *spread_expr = named_arg_get(args, "spread");
   const Expression *y_expr = named_arg_get(args, "y");
 
-  const float frequency = (float)eval_double_or(frequency_expr, state, 0.0);
-  const int seed = eval_int_or(seed_expr, state, 0);
-  const float threshold_value = (float)eval_double_or(threshold_expr, state, -1.0);
-  const float spread = (float)eval_double_or(spread_expr, state, 0.0);
-  const int base_y = eval_int_or(y_expr, state, origin_y);
+  const float frequency = (float)painter_eval_double_or(frequency_expr, state, 0.0);
+  const int seed = painter_eval_int_or(seed_expr, state, 0);
+  const float threshold_value = (float)painter_eval_double_or(threshold_expr, state, -1.0);
+  const float spread = (float)painter_eval_double_or(spread_expr, state, 0.0);
+  const int base_y = painter_eval_int_or(y_expr, state, origin_y);
 
   const bool use_threshold = threshold_expr && threshold_value >= 0.0f;
   const float threshold_cutoff = (threshold_value * 2.0f) - 1.0f;
@@ -218,15 +211,15 @@ static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *a
   const Expression *min_y_expr = named_arg_get(args, "min_y");
   const Expression *max_y_expr = named_arg_get(args, "max_y");
 
-  const float frequency = (float)eval_double_or(frequency_expr, state, 0.0);
-  const int seed = eval_int_or(seed_expr, state, 0);
-  const float threshold_value = (float)eval_double_or(threshold_expr, state, -1.0);
+  const float frequency = (float)painter_eval_double_or(frequency_expr, state, 0.0);
+  const int seed = painter_eval_int_or(seed_expr, state, 0);
+  const float threshold_value = (float)painter_eval_double_or(threshold_expr, state, -1.0);
   const bool use_threshold = threshold_expr && threshold_value >= 0.0f;
   const float threshold_cutoff = (threshold_value * 2.0f) - 1.0f;
   const bool clamp_min_y = min_y_expr != NULL;
   const bool clamp_max_y = max_y_expr != NULL;
-  const int min_y = clamp_min_y ? eval_int_or(min_y_expr, state, INT32_MIN) : INT32_MIN;
-  const int max_y = clamp_max_y ? eval_int_or(max_y_expr, state, INT32_MAX) : INT32_MAX;
+  const int min_y = clamp_min_y ? painter_eval_int_or(min_y_expr, state, INT32_MIN) : INT32_MIN;
+  const int max_y = clamp_max_y ? painter_eval_int_or(max_y_expr, state, INT32_MAX) : INT32_MAX;
   if (clamp_min_y && clamp_max_y && min_y > max_y) {
     return;
   }
@@ -292,9 +285,9 @@ static void occurrence_section(ExecutionState *state, const NamedArgumentList *a
     return;
   }
 
-  const int offset_x = eval_int_or(named_arg_get(args, "x"), state, 0);
-  const int offset_y = eval_int_or(named_arg_get(args, "y"), state, 0);
-  const int offset_z = eval_int_or(named_arg_get(args, "z"), state, 0);
+  const int offset_x = painter_eval_int_or(named_arg_get(args, "x"), state, 0);
+  const int offset_y = painter_eval_int_or(named_arg_get(args, "y"), state, 0);
+  const int offset_z = painter_eval_int_or(named_arg_get(args, "z"), state, 0);
 
   // Validate offsets are within section bounds (0-15)
   if (offset_x < 0 || offset_x > 15 || offset_y < 0 || offset_y > 15 || offset_z < 0 || offset_z > 15) {

@@ -6,6 +6,7 @@
 #include "builtin_macros.h"
 #include "builtin_occurrences.h"
 #include <limits.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -658,4 +659,115 @@ bool painter_section_clip_aabb(const ExecutionState *state, PainterAABB *box) {
   if (box->max_z > section_max_z) box->max_z = section_max_z;
 
   return true;
+}
+
+// Expression evaluation helpers
+int painter_eval_offset(const Expression *expr, ExecutionState *state) { return expr ? (int)painter_evaluate_expression(expr, state) : 0; }
+
+bool painter_eval_positive_extent(const Expression *expr, ExecutionState *state, int *out_extent) {
+  if (!expr || !out_extent) {
+    return false;
+  }
+
+  const double value = painter_evaluate_expression(expr, state);
+  if (!isfinite(value) || value <= 0.0) {
+    return false;
+  }
+
+  const long long rounded = llround(value);
+  if (rounded <= 0) {
+    return false;
+  }
+
+  *out_extent = (int)rounded;
+  return true;
+}
+
+bool painter_eval_boolean_flag(const Expression *expr, ExecutionState *state) {
+  if (!expr) {
+    return false;
+  }
+  return painter_evaluate_expression(expr, state) != 0.0;
+}
+
+bool painter_eval_coordinate_argument(const Expression *expr, ExecutionState *state, int *out_x, int *out_y, int *out_z) {
+  if (!expr || !state || !out_x || !out_y || !out_z) {
+    return false;
+  }
+
+  if (expr->type != EXPR_COORDINATE || !expr->coordinate.x) {
+    return false;
+  }
+
+  const double x_val = painter_evaluate_expression(expr->coordinate.x, state);
+  const double y_val = expr->coordinate.y ? painter_evaluate_expression(expr->coordinate.y, state) : 0.0;
+  const double z_val = expr->coordinate.z ? painter_evaluate_expression(expr->coordinate.z, state) : 0.0;
+
+  *out_x = state->current_origin_x + (int)llround(x_val);
+  *out_y = state->current_origin_y + (int)llround(y_val);
+  *out_z = state->current_origin_z + (int)llround(z_val);
+  return true;
+}
+
+bool painter_eval_positive_component_or_default(const Expression *expr, ExecutionState *state, int default_value, int *out_value) {
+  if (!out_value) {
+    return false;
+  }
+  if (!expr) {
+    if (default_value <= 0) {
+      return false;
+    }
+    *out_value = default_value;
+    return true;
+  }
+  const double value = painter_evaluate_expression(expr, state);
+  if (!isfinite(value)) {
+    return false;
+  }
+  const long long rounded = llround(value);
+  if (rounded <= 0) {
+    return false;
+  }
+  *out_value = (int)rounded;
+  return true;
+}
+
+bool painter_eval_positive_vector3(
+    const Expression *expr, ExecutionState *state, int default_y, int default_z, int *out_x, int *out_y, int *out_z) {
+  if (!expr || !out_x || !out_y || !out_z) {
+    return false;
+  }
+
+  const Expression *x_expr = expr;
+  const Expression *y_expr = NULL;
+  const Expression *z_expr = NULL;
+
+  if (expr->type == EXPR_COORDINATE) {
+    x_expr = expr->coordinate.x;
+    y_expr = expr->coordinate.y;
+    z_expr = expr->coordinate.z;
+  }
+
+  if (!x_expr) {
+    return false;
+  }
+
+  if (!painter_eval_positive_component_or_default(x_expr, state, -1, out_x)) {
+    return false;
+  }
+  if (!painter_eval_positive_component_or_default(y_expr, state, default_y, out_y)) {
+    return false;
+  }
+  if (!painter_eval_positive_component_or_default(z_expr, state, default_z, out_z)) {
+    return false;
+  }
+  return true;
+}
+
+double painter_eval_double_or(const Expression *expr, ExecutionState *state, double fallback) {
+  return expr ? painter_evaluate_expression(expr, state) : fallback;
+}
+
+int painter_eval_int_or(const Expression *expr, ExecutionState *state, int fallback) {
+  return (int)llround(painter_eval_double_or(expr, state, (double)fallback));
 }
