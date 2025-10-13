@@ -101,6 +101,156 @@ static void draw_line(ExecutionState *state, int x0, int y0, int z0, int x1, int
   }
 }
 
+// Ramp macro: #ramp .from=[x, y, z] .to=[x, y, z] .block=<block_name> [.blocks=[block1, block2, ...]]
+// Builds stair-like structures between two coordinates with optional block gradient
+void builtin_macro_ramp(ExecutionState *state, const NamedArgumentList *args) {
+  if (!state) return;
+
+  const Expression *from_expr = named_arg_get(args, "from");
+  const Expression *to_expr = named_arg_get(args, "to");
+  if (!from_expr || !to_expr) {
+    return;
+  }
+
+  int from_x = 0, from_y = 0, from_z = 0;
+  int to_x = 0, to_y = 0, to_z = 0;
+  if (!painter_eval_coordinate_argument(from_expr, state, &from_x, &from_y, &from_z) ||
+      !painter_eval_coordinate_argument(to_expr, state, &to_x, &to_y, &to_z)) {
+    return;
+  }
+
+  // Calculate the deltas
+  const int dx = to_x - from_x;
+  const int dy = to_y - from_y;
+  const int dz = to_z - from_z;
+
+  // Calculate horizontal distance (Manhattan distance in XZ plane)
+  const int horizontal_dist = abs(dx) + abs(dz);
+  if (horizontal_dist == 0) {
+    // Pure vertical column - just use column macro logic
+    if (dy == 0) {
+      // Single block
+      Expression *block_expr = named_arg_get(args, "block");
+      if (block_expr) {
+        const int palette_index = add_block_to_palette(state, block_expr);
+        write_block_if_visible(state, from_x, from_y, from_z, palette_index);
+      }
+      return;
+    }
+    // Vertical line
+    Expression *block_expr = named_arg_get(args, "block");
+    if (!block_expr) return;
+    const int palette_index = add_block_to_palette(state, block_expr);
+    if (palette_index < 0) return;
+    const int step_y = (dy > 0) ? 1 : -1;
+    for (int y = from_y; y != to_y + step_y; y += step_y) {
+      write_block_if_visible(state, from_x, y, from_z, palette_index);
+    }
+    return;
+  }
+
+  // Check for blocks array (gradient)
+  Expression *blocks_expr = named_arg_get(args, "blocks");
+  Expression *block_expr = named_arg_get(args, "block");
+
+  int *palette_indices = NULL;
+  int palette_count = 0;
+
+  if (blocks_expr && blocks_expr->type == EXPR_ARRAY) {
+    // Use block gradient
+    palette_count = (int)blocks_expr->array.elements.count;
+    if (palette_count > 0) {
+      palette_indices = (int *)malloc(palette_count * sizeof(int));
+      if (!palette_indices) return;
+
+      for (int i = 0; i < palette_count; i++) {
+        Expression *elem = blocks_expr->array.elements.items[i];
+        palette_indices[i] = add_block_to_palette(state, elem);
+        if (palette_indices[i] < 0) {
+          free(palette_indices);
+          return;
+        }
+      }
+    }
+  } else if (block_expr) {
+    // Single block
+    palette_count = 1;
+    palette_indices = (int *)malloc(sizeof(int));
+    if (!palette_indices) return;
+    palette_indices[0] = add_block_to_palette(state, block_expr);
+    if (palette_indices[0] < 0) {
+      free(palette_indices);
+      return;
+    }
+  } else {
+    return; // No block specified
+  }
+
+  // Build the ramp by distributing vertical steps across the horizontal distance
+  // Each "step" will advance horizontally and potentially vertically
+  const int total_steps = horizontal_dist;
+  const double y_per_step = (double)dy / (double)total_steps;
+
+  // Calculate step directions
+  const int step_x = (dx > 0) ? 1 : (dx < 0 ? -1 : 0);
+  const int step_z = (dz > 0) ? 1 : (dz < 0 ? -1 : 0);
+
+  int current_x = from_x;
+  int current_z = from_z;
+  double accumulated_y = from_y;
+
+  // Calculate bounds for optimization
+  PainterAABB bounds = {
+      .min_x = from_x < to_x ? from_x : to_x,
+      .max_x = from_x > to_x ? from_x : to_x,
+      .min_y = from_y < to_y ? from_y : to_y,
+      .max_y = from_y > to_y ? from_y : to_y,
+      .min_z = from_z < to_z ? from_z : to_z,
+      .max_z = from_z > to_z ? from_z : to_z,
+  };
+
+  if (!painter_section_clip_aabb(state, &bounds)) {
+    free(palette_indices);
+    return;
+  }
+
+  // Place blocks along the ramp
+  for (int step = 0; step <= total_steps; step++) {
+    int current_y = (int)llround(accumulated_y);
+
+    // Choose block based on progress (for gradient)
+    int palette_index;
+    if (palette_count > 1) {
+      // Map progress to gradient
+      double progress = (double)step / (double)total_steps;
+      int gradient_index = (int)(progress * (palette_count - 1));
+      if (gradient_index >= palette_count) gradient_index = palette_count - 1;
+      palette_index = palette_indices[gradient_index];
+    } else {
+      palette_index = palette_indices[0];
+    }
+
+    write_block_if_visible(state, current_x, current_y, current_z, palette_index);
+
+    // Advance horizontally
+    if (step < total_steps) {
+      // Decide which axis to advance on
+      const int remaining_x = abs(to_x - current_x);
+      const int remaining_z = abs(to_z - current_z);
+
+      if (remaining_x > 0 && (remaining_z == 0 || remaining_x >= remaining_z)) {
+        current_x += step_x;
+      } else if (remaining_z > 0) {
+        current_z += step_z;
+      }
+
+      accumulated_y += y_per_step;
+    }
+  }
+
+  free(palette_indices);
+}
+
 // Sphere macro: #sphere .x=<x> .y=<y> .z=<z> .radius=<radius> .block=<block_name>
 void builtin_macro_sphere(ExecutionState *state, const NamedArgumentList *args) {
   if (!state) return;
@@ -518,6 +668,7 @@ const BuiltinMacro BUILTIN_MACROS[] = {
     {"line", builtin_macro_line},
     {"column", builtin_macro_column},
     {"lattice", builtin_macro_lattice},
+    {"ramp", builtin_macro_ramp},
 };
 
 const int BUILTIN_MACROS_COUNT = sizeof(BUILTIN_MACROS) / sizeof(BuiltinMacro);

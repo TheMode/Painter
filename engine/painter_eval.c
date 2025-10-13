@@ -59,15 +59,18 @@ static int calculate_bits_per_entry(int palette_size) {
 // Evaluate block position (inlined for performance)
 static inline bool evaluate_block_position(const BlockPlacement *placement, ExecutionState *state, int origin_x, int origin_y, int origin_z,
     int *world_x, int *world_y, int *world_z) {
-  if (!placement->coordinate || placement->coordinate->type != EXPR_COORDINATE) {
+  if (!placement->coordinate || placement->coordinate->type != EXPR_ARRAY) {
     return false;
   }
 
-  const int offset_x = (int)painter_evaluate_expression(placement->coordinate->coordinate.x, state);
-  const int offset_y = placement->coordinate->coordinate.y ? (int)painter_evaluate_expression(placement->coordinate->coordinate.y, state)
-                                                           : 0;
-  const int offset_z = placement->coordinate->coordinate.z ? (int)painter_evaluate_expression(placement->coordinate->coordinate.z, state)
-                                                           : 0;
+  const ExpressionList *elements = &placement->coordinate->array.elements;
+  if (elements->count != 3) {
+    return false; // Must be [x, y, z]
+  }
+
+  const int offset_x = (int)painter_evaluate_expression(elements->items[0], state);
+  const int offset_y = (int)painter_evaluate_expression(elements->items[1], state);
+  const int offset_z = (int)painter_evaluate_expression(elements->items[2], state);
 
   *world_x = origin_x + offset_x;
   *world_y = origin_y + offset_y;
@@ -135,7 +138,6 @@ double painter_evaluate_expression(const Expression *expr, ExecutionState *state
     }
     return entry->function ? entry->function(arg_values, arg_count) : 0.0;
   }
-  case EXPR_COORDINATE: break;
   case EXPR_ARRAY: break; // Arrays don't evaluate to a single number
   }
 
@@ -150,20 +152,45 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
   case INSTR_BLOCK_PLACEMENT: {
     const BlockPlacement *placement = &instr->block_placement;
     const Expression *coord = placement->coordinate;
-    
-    if (!coord || coord->type != EXPR_COORDINATE) {
+
+    if (!coord || coord->type != EXPR_ARRAY || coord->array.elements.count != 3) {
       return false;
     }
 
-    // Evaluate base coordinates
-    const int base_x = (int)painter_evaluate_expression(coord->coordinate.x, state);
-    const int base_y = coord->coordinate.y ? (int)painter_evaluate_expression(coord->coordinate.y, state) : 0;
-    const int base_z = coord->coordinate.z ? (int)painter_evaluate_expression(coord->coordinate.z, state) : 0;
+    Expression *x_expr = coord->array.elements.items[0];
+    Expression *y_expr = coord->array.elements.items[1];
+    Expression *z_expr = coord->array.elements.items[2];
 
-    // Evaluate range ends (if they exist)
-    const int end_x = coord->coordinate.x_end ? (int)painter_evaluate_expression(coord->coordinate.x_end, state) : base_x;
-    const int end_y = coord->coordinate.y_end ? (int)painter_evaluate_expression(coord->coordinate.y_end, state) : base_y;
-    const int end_z = coord->coordinate.z_end ? (int)painter_evaluate_expression(coord->coordinate.z_end, state) : base_z;
+    // Evaluate base coordinates
+    int base_x, base_y, base_z;
+    int end_x, end_y, end_z;
+
+    // Handle x (might be a range [start, end])
+    if (x_expr->type == EXPR_ARRAY && x_expr->array.elements.count == 2) {
+      base_x = (int)painter_evaluate_expression(x_expr->array.elements.items[0], state);
+      end_x = (int)painter_evaluate_expression(x_expr->array.elements.items[1], state);
+    } else {
+      base_x = (int)painter_evaluate_expression(x_expr, state);
+      end_x = base_x;
+    }
+
+    // Handle y (might be a range [start, end])
+    if (y_expr->type == EXPR_ARRAY && y_expr->array.elements.count == 2) {
+      base_y = (int)painter_evaluate_expression(y_expr->array.elements.items[0], state);
+      end_y = (int)painter_evaluate_expression(y_expr->array.elements.items[1], state);
+    } else {
+      base_y = (int)painter_evaluate_expression(y_expr, state);
+      end_y = base_y;
+    }
+
+    // Handle z (might be a range [start, end])
+    if (z_expr->type == EXPR_ARRAY && z_expr->array.elements.count == 2) {
+      base_z = (int)painter_evaluate_expression(z_expr->array.elements.items[0], state);
+      end_z = (int)painter_evaluate_expression(z_expr->array.elements.items[1], state);
+    } else {
+      base_z = (int)painter_evaluate_expression(z_expr, state);
+      end_z = base_z;
+    }
 
     // Calculate world-space bounding box
     const int world_min_x = origin_x + (base_x < end_x ? base_x : end_x);
@@ -306,8 +333,8 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
   case INSTR_BLOCK_PLACEMENT: {
     const BlockPlacement *placement = &instr->block_placement;
     const Expression *coord = placement->coordinate;
-    
-    if (!coord || coord->type != EXPR_COORDINATE) {
+
+    if (!coord || coord->type != EXPR_ARRAY || coord->array.elements.count != 3) {
       break;
     }
 
@@ -316,15 +343,39 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
       break;
     }
 
-    // Evaluate base coordinates
-    const int base_x = (int)painter_evaluate_expression(coord->coordinate.x, state);
-    const int base_y = coord->coordinate.y ? (int)painter_evaluate_expression(coord->coordinate.y, state) : 0;
-    const int base_z = coord->coordinate.z ? (int)painter_evaluate_expression(coord->coordinate.z, state) : 0;
+    Expression *x_expr = coord->array.elements.items[0];
+    Expression *y_expr = coord->array.elements.items[1];
+    Expression *z_expr = coord->array.elements.items[2];
 
-    // Evaluate range ends (if they exist)
-    const int end_x = coord->coordinate.x_end ? (int)painter_evaluate_expression(coord->coordinate.x_end, state) : base_x;
-    const int end_y = coord->coordinate.y_end ? (int)painter_evaluate_expression(coord->coordinate.y_end, state) : base_y;
-    const int end_z = coord->coordinate.z_end ? (int)painter_evaluate_expression(coord->coordinate.z_end, state) : base_z;
+    // Evaluate base coordinates and range ends
+    int base_x, end_x, base_y, end_y, base_z, end_z;
+
+    // Handle x (might be a range [start, end])
+    if (x_expr->type == EXPR_ARRAY && x_expr->array.elements.count == 2) {
+      base_x = (int)painter_evaluate_expression(x_expr->array.elements.items[0], state);
+      end_x = (int)painter_evaluate_expression(x_expr->array.elements.items[1], state);
+    } else {
+      base_x = (int)painter_evaluate_expression(x_expr, state);
+      end_x = base_x;
+    }
+
+    // Handle y (might be a range [start, end])
+    if (y_expr->type == EXPR_ARRAY && y_expr->array.elements.count == 2) {
+      base_y = (int)painter_evaluate_expression(y_expr->array.elements.items[0], state);
+      end_y = (int)painter_evaluate_expression(y_expr->array.elements.items[1], state);
+    } else {
+      base_y = (int)painter_evaluate_expression(y_expr, state);
+      end_y = base_y;
+    }
+
+    // Handle z (might be a range [start, end])
+    if (z_expr->type == EXPR_ARRAY && z_expr->array.elements.count == 2) {
+      base_z = (int)painter_evaluate_expression(z_expr->array.elements.items[0], state);
+      end_z = (int)painter_evaluate_expression(z_expr->array.elements.items[1], state);
+    } else {
+      base_z = (int)painter_evaluate_expression(z_expr, state);
+      end_z = base_z;
+    }
 
     // Determine iteration direction for each axis
     const int step_x = (end_x >= base_x) ? 1 : -1;
@@ -417,7 +468,7 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
       context_set_palette(state->variables, instr->assignment.name, instr->assignment.palette_definition);
     } else {
       Assignment *assignment = &instr->assignment;
-      
+
       // Check if the value is an array expression
       if (assignment->value && assignment->value->type == EXPR_ARRAY) {
         // Evaluate each array element
@@ -604,9 +655,14 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
     section->data_size = 0;
     section->data = NULL;
   } else {
-    const int blocks_per_long = 64 / section->bits_per_entry;
+    const int bits_per_entry = section->bits_per_entry;
+    int blocks_per_long = bits_per_entry >= 64 ? 1 : 64 / bits_per_entry;
+    if (blocks_per_long <= 0) {
+      blocks_per_long = 1;
+    }
+
     section->data_size = (4096 + blocks_per_long - 1) / blocks_per_long;
-    section->data = calloc(section->data_size, sizeof(uint64_t));
+    section->data = section->data_size > 0 ? calloc((size_t)section->data_size, sizeof(uint64_t)) : NULL;
 
     if (!section->data) {
       cleanup_execution_state(&state, &occurrence_registry);
@@ -614,16 +670,24 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
       return NULL;
     }
 
-    // Optimized packing loop - reduces div/mod operations
+    // Pack palette indices while keeping each value within a single 64-bit word.
     int long_index = 0;
     int offset_in_long = 0;
+    int blocks_in_current_long = 0;
+
     for (int i = 0; i < 4096; i++) {
+      if (blocks_in_current_long >= blocks_per_long) {
+        long_index++;
+        blocks_in_current_long = 0;
+        offset_in_long = 0;
+      }
+
       section->data[long_index] |= ((uint64_t)block_indices[i]) << offset_in_long;
 
-      offset_in_long += section->bits_per_entry;
+      blocks_in_current_long++;
+      offset_in_long += bits_per_entry;
       if (offset_in_long >= 64) {
         offset_in_long = 0;
-        long_index++;
       }
     }
   }
@@ -770,19 +834,7 @@ bool painter_eval_coordinate_argument(const Expression *expr, ExecutionState *st
     return false;
   }
 
-  // Handle EXPR_COORDINATE (legacy coordinate syntax)
-  if (expr->type == EXPR_COORDINATE && expr->coordinate.x) {
-    const double x_val = painter_evaluate_expression(expr->coordinate.x, state);
-    const double y_val = expr->coordinate.y ? painter_evaluate_expression(expr->coordinate.y, state) : 0.0;
-    const double z_val = expr->coordinate.z ? painter_evaluate_expression(expr->coordinate.z, state) : 0.0;
-
-    *out_x = state->current_origin_x + (int)llround(x_val);
-    *out_y = state->current_origin_y + (int)llround(y_val);
-    *out_z = state->current_origin_z + (int)llround(z_val);
-    return true;
-  }
-
-  // Handle EXPR_ARRAY as coordinate (for macro arguments like .from=[0, 0, 0])
+  // Handle EXPR_ARRAY as coordinate (arrays of 2 or 3 elements)
   if (expr->type == EXPR_ARRAY) {
     size_t count = expr->array.elements.count;
     if (count < 2 || count > 3) {
@@ -791,7 +843,7 @@ bool painter_eval_coordinate_argument(const Expression *expr, ExecutionState *st
 
     const double x_val = painter_evaluate_expression(expr->array.elements.items[0], state);
     const double y_val = count == 3 ? painter_evaluate_expression(expr->array.elements.items[1], state) : 0.0;
-    const double z_val = count == 3 ? painter_evaluate_expression(expr->array.elements.items[2], state) 
+    const double z_val = count == 3 ? painter_evaluate_expression(expr->array.elements.items[2], state)
                                     : painter_evaluate_expression(expr->array.elements.items[1], state);
 
     *out_x = state->current_origin_x + (int)llround(x_val);
@@ -836,11 +888,7 @@ bool painter_eval_positive_vector3(
   const Expression *y_expr = NULL;
   const Expression *z_expr = NULL;
 
-  if (expr->type == EXPR_COORDINATE) {
-    x_expr = expr->coordinate.x;
-    y_expr = expr->coordinate.y;
-    z_expr = expr->coordinate.z;
-  } else if (expr->type == EXPR_ARRAY) {
+  if (expr->type == EXPR_ARRAY) {
     // Handle array as coordinate
     size_t count = expr->array.elements.count;
     if (count >= 1) {

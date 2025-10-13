@@ -1,0 +1,111 @@
+// Painter DSL - Ramp Macro Demonstration
+// The #ramp macro creates stair-like structures between two coordinates
+
+// Basic ramp examples
+// ==================
+
+// Simple diagonal ramp in X-Y plane (ascending to the right)
+#ramp .from=[0, 0, 0] .to=[10, 5, 0] .block=stone
+
+// Diagonal ramp in Z-Y plane (ascending along Z axis)
+#ramp .from=[0, 0, 10] .to=[0, 5, 20] .block=cobblestone
+
+// Flat horizontal ramp (no vertical change)
+#ramp .from=[15, 0, 0] .to=[25, 0, 0] .block=oak_planks
+
+// Pure vertical column (no horizontal change)
+#ramp .from=[30, 0, 0] .to=[30, 10, 0] .block=brick
+
+// 3D diagonal ramp (changes in all three dimensions)
+#ramp .from=[40, 0, 0] .to=[50, 8, 10] .block=diamond_block
+
+// Gradient ramps with multiple blocks
+// ===================================
+
+// Simple two-block gradient
+#ramp .from=[0, 10, 0] .to=[10, 15, 0] .blocks=[stone, stone_bricks]
+
+// Multi-block gradient creating a smooth transition
+#ramp .from=[15, 10, 0] .to=[30, 18, 0] .blocks=[
+  oak_planks,
+  spruce_planks,
+  birch_planks,
+  jungle_planks,
+  acacia_planks,
+  dark_oak_planks
+]
+
+// Stone gradient from raw to polished
+#ramp .from=[0, 20, 0] .to=[15, 28, 0] .blocks=[
+  stone,
+  cobblestone,
+  mossy_cobblestone,
+  stone_bricks,
+  chiseled_stone_bricks,
+  polished_andesite
+]
+
+// Descending ramps
+// ================
+
+// Simple descending ramp
+#ramp .from=[0, 30, 0] .to=[10, 20, 0] .block=gold_block
+
+// Descending with gradient
+#ramp .from=[15, 30, 0] .to=[25, 22, 0] .blocks=[
+  glowstone,
+  gold_block,
+  iron_block,
+  copper_block
+]
+
+// Practical examples
+// ==================
+
+// Mountain stairs with natural gradient
+#ramp .from=[40, 10, 20] .to=[60, 30, 35] .blocks=[
+  grass_block,
+  dirt,
+  coarse_dirt,
+  stone,
+  cobblestone,
+  mossy_cobblestone,
+  andesite
+]
+
+// Rainbow staircase
+#ramp .from=[0, 0, 30] .to=[16, 16, 30] .blocks=[
+  red_concrete,
+  orange_concrete,
+  yellow_concrete,
+  lime_concrete,
+  light_blue_concrete,
+  blue_concrete,
+  purple_concrete,
+  magenta_concrete,
+  pink_concrete
+]
+
+// Horizontal diagonal ramp in XZ plane (flat elevation)
+#ramp .from=[0, 35, 0] .to=[10, 35, 10] .block=emerald_block
+
+// Complex multi-directional structure
+#ramp .from=[30, 0, 30] .to=[45, 10, 45] .blocks=[
+  quartz_block,
+  quartz_pillar,
+  chiseled_quartz_block,
+  smooth_quartz
+]
+
+// Simple base platform for visibility
+for x in -5..65 {
+  for z in -5..50 {
+    [x, -1, z] bedrock
+  }
+}
+
+// Markers at key points
+[0, 0, 0] glowstone
+[10, 5, 0] glowstone
+[30, 10, 0] glowstone
+[40, 8, 10] glowstone

@@ -512,24 +512,54 @@ static Expression *parse_expression(Parser *parser) { return parse_comparison(pa
 
 static Expression *parse_coordinate(Parser *parser) {
   // Expects [ is already consumed
-  Expression *coord = alloc_or_error(parser, sizeof(Expression), "Out of memory");
-  if (!coord) return NULL;
-
-  coord->type = EXPR_COORDINATE;
-  coord->coordinate.y = NULL;
-  coord->coordinate.z = NULL;
-  coord->coordinate.x_end = NULL;
-  coord->coordinate.y_end = NULL;
-  coord->coordinate.z_end = NULL;
+  // Returns an EXPR_ARRAY with 2 or 3 elements representing [x, z] or [x, y, z]
+  // Each element can be a range expression (start..end)
+  
+  Expression *array = alloc_or_error(parser, sizeof(Expression), "Out of memory");
+  if (!array) return NULL;
+  
+  array->type = EXPR_ARRAY;
+  expression_list_init(&array->array.elements);
 
   // Parse first value (always x)
-  coord->coordinate.x = parse_expression(parser);
-  if (!coord->coordinate.x) goto error;
+  Expression *first = parse_expression(parser);
+  if (!first) goto error;
 
   // Check for range operator (..)
   if (consume(TOKEN_DOT_DOT)) {
-    coord->coordinate.x_end = parse_expression(parser);
-    if (!coord->coordinate.x_end) goto error;
+    // Create array [start, end] for the range
+    Expression *range_array = alloc_or_error(parser, sizeof(Expression), "Out of memory");
+    if (!range_array) {
+      expression_free(first);
+      goto error;
+    }
+    range_array->type = EXPR_ARRAY;
+    expression_list_init(&range_array->array.elements);
+    
+    if (!expression_list_push(parser, &range_array->array.elements, first)) {
+      expression_free(first);
+      expression_free(range_array);
+      goto error;
+    }
+    
+    Expression *first_end = parse_expression(parser);
+    if (!first_end) {
+      expression_free(range_array);
+      goto error;
+    }
+    
+    if (!expression_list_push(parser, &range_array->array.elements, first_end)) {
+      expression_free(first_end);
+      expression_free(range_array);
+      goto error;
+    }
+    
+    first = range_array;
+  }
+  
+  if (!expression_list_push(parser, &array->array.elements, first)) {
+    expression_free(first);
+    goto error;
   }
 
   if (!expect_token(parser, TOKEN_COMMA, "Expected ',' between coordinate values")) {
@@ -541,47 +571,115 @@ static Expression *parse_coordinate(Parser *parser) {
   if (!second) goto error;
 
   // Check for range operator on second value
-  Expression *second_end = NULL;
   if (consume(TOKEN_DOT_DOT)) {
-    second_end = parse_expression(parser);
-    if (!second_end) {
+    Expression *range_array = alloc_or_error(parser, sizeof(Expression), "Out of memory");
+    if (!range_array) {
       expression_free(second);
       goto error;
     }
+    range_array->type = EXPR_ARRAY;
+    expression_list_init(&range_array->array.elements);
+    
+    if (!expression_list_push(parser, &range_array->array.elements, second)) {
+      expression_free(second);
+      expression_free(range_array);
+      goto error;
+    }
+    
+    Expression *second_end = parse_expression(parser);
+    if (!second_end) {
+      expression_free(range_array);
+      goto error;
+    }
+    
+    if (!expression_list_push(parser, &range_array->array.elements, second_end)) {
+      expression_free(second_end);
+      expression_free(range_array);
+      goto error;
+    }
+    
+    second = range_array;
   }
 
   if (consume(TOKEN_COMMA)) {
     // Three values provided: [x, y, z]
-    coord->coordinate.y = second;
-    coord->coordinate.y_end = second_end;
-    coord->coordinate.z = parse_expression(parser);
-    if (!coord->coordinate.z) goto error;
+    // Add second as the y coordinate
+    if (!expression_list_push(parser, &array->array.elements, second)) {
+      expression_free(second);
+      goto error;
+    }
+    
+    // Parse z coordinate
+    Expression *third = parse_expression(parser);
+    if (!third) goto error;
 
     // Check for range operator on third value
     if (consume(TOKEN_DOT_DOT)) {
-      coord->coordinate.z_end = parse_expression(parser);
-      if (!coord->coordinate.z_end) goto error;
+      Expression *range_array = alloc_or_error(parser, sizeof(Expression), "Out of memory");
+      if (!range_array) {
+        expression_free(third);
+        goto error;
+      }
+      range_array->type = EXPR_ARRAY;
+      expression_list_init(&range_array->array.elements);
+      
+      if (!expression_list_push(parser, &range_array->array.elements, third)) {
+        expression_free(third);
+        expression_free(range_array);
+        goto error;
+      }
+      
+      Expression *third_end = parse_expression(parser);
+      if (!third_end) {
+        expression_free(range_array);
+        goto error;
+      }
+      
+      if (!expression_list_push(parser, &range_array->array.elements, third_end)) {
+        expression_free(third_end);
+        expression_free(range_array);
+        goto error;
+      }
+      
+      third = range_array;
+    }
+    
+    if (!expression_list_push(parser, &array->array.elements, third)) {
+      expression_free(third);
+      goto error;
     }
   } else {
     // Two values provided: [x, z], y defaults to 0
-    coord->coordinate.z = second;
-    coord->coordinate.z_end = second_end;
+    // Insert a 0 for y coordinate
+    Expression *zero_y = alloc_or_error(parser, sizeof(Expression), "Out of memory");
+    if (!zero_y) {
+      expression_free(second);
+      goto error;
+    }
+    zero_y->type = EXPR_NUMBER;
+    zero_y->number = 0.0;
+    
+    if (!expression_list_push(parser, &array->array.elements, zero_y)) {
+      expression_free(zero_y);
+      expression_free(second);
+      goto error;
+    }
+    
+    // Add second as the z coordinate
+    if (!expression_list_push(parser, &array->array.elements, second)) {
+      expression_free(second);
+      goto error;
+    }
   }
 
   if (!expect_token(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after coordinate")) {
     goto error;
   }
 
-  return coord;
+  return array;
 
 error:
-  expression_free(coord->coordinate.x);
-  expression_free(coord->coordinate.x_end);
-  expression_free(coord->coordinate.y);
-  expression_free(coord->coordinate.y_end);
-  expression_free(coord->coordinate.z);
-  expression_free(coord->coordinate.z_end);
-  free(coord);
+  expression_free(array);
   return NULL;
 }
 
@@ -1394,15 +1492,6 @@ static Expression *expression_copy(const Expression *expr) {
       return NULL;
     }
     break;
-  case EXPR_COORDINATE:
-    copy->coordinate.x = expression_copy(expr->coordinate.x);
-    copy->coordinate.y = expression_copy(expr->coordinate.y);
-    copy->coordinate.z = expression_copy(expr->coordinate.z);
-    if (!copy->coordinate.x || !copy->coordinate.y || !copy->coordinate.z) {
-      expression_free(copy);
-      return NULL;
-    }
-    break;
   case EXPR_FUNCTION_CALL:
     safe_strncpy(copy->function_call.name, expr->function_call.name, MAX_TOKEN_VALUE_LENGTH);
     expression_list_init(&copy->function_call.args);
@@ -1441,14 +1530,6 @@ void expression_free(Expression *expr) {
     expression_free(expr->binary.right);
     break;
   case EXPR_UNARY_OP: expression_free(expr->unary.operand); break;
-  case EXPR_COORDINATE:
-    expression_free(expr->coordinate.x);
-    expression_free(expr->coordinate.y);
-    expression_free(expr->coordinate.z);
-    expression_free(expr->coordinate.x_end);
-    expression_free(expr->coordinate.y_end);
-    expression_free(expr->coordinate.z_end);
-    break;
   case EXPR_FUNCTION_CALL: expression_list_destroy(&expr->function_call.args); break;
   case EXPR_ARRAY: expression_list_destroy(&expr->array.elements); break;
   default: break;
@@ -2012,44 +2093,54 @@ static void update_instruction_bounds(InstructionList *list, const Instruction *
   switch (instr->type) {
   case INSTR_BLOCK_PLACEMENT: {
     const BlockPlacement *placement = &instr->block_placement;
-    if (placement->coordinate && placement->coordinate->type == EXPR_COORDINATE) {
+    if (placement->coordinate && placement->coordinate->type == EXPR_ARRAY) {
+      const ExpressionList *elements = &placement->coordinate->array.elements;
+      
+      // Coordinate arrays must have exactly 3 elements: [x, y, z]
+      if (elements->count != 3) {
+        break;
+      }
+      
+      Expression *x_expr = elements->items[0];
+      Expression *y_expr = elements->items[1];
+      Expression *z_expr = elements->items[2];
+      
       int x_min, x_max, y_min, y_max, z_min, z_max;
-      estimate_expression_bounds(placement->coordinate->coordinate.x, &x_min, &x_max, conservative_range);
-
-      // Handle x range if present
-      if (placement->coordinate->coordinate.x_end) {
-        int x_end_min, x_end_max;
-        estimate_expression_bounds(placement->coordinate->coordinate.x_end, &x_end_min, &x_end_max, conservative_range);
-        if (x_end_min < x_min) x_min = x_end_min;
-        if (x_end_max > x_max) x_max = x_end_max;
-      }
-
-      if (placement->coordinate->coordinate.y) {
-        estimate_expression_bounds(placement->coordinate->coordinate.y, &y_min, &y_max, conservative_range);
+      
+      // Handle x coordinate (might be a range array [start, end])
+      if (x_expr->type == EXPR_ARRAY && x_expr->array.elements.count == 2) {
+        // It's a range
+        int x_start_min, x_start_max, x_end_min, x_end_max;
+        estimate_expression_bounds(x_expr->array.elements.items[0], &x_start_min, &x_start_max, conservative_range);
+        estimate_expression_bounds(x_expr->array.elements.items[1], &x_end_min, &x_end_max, conservative_range);
+        x_min = x_start_min < x_end_min ? x_start_min : x_end_min;
+        x_max = x_start_max > x_end_max ? x_start_max : x_end_max;
       } else {
-        y_min = y_max = 0;
+        estimate_expression_bounds(x_expr, &x_min, &x_max, conservative_range);
       }
-
-      // Handle y range if present
-      if (placement->coordinate->coordinate.y_end) {
-        int y_end_min, y_end_max;
-        estimate_expression_bounds(placement->coordinate->coordinate.y_end, &y_end_min, &y_end_max, conservative_range);
-        if (y_end_min < y_min) y_min = y_end_min;
-        if (y_end_max > y_max) y_max = y_end_max;
-      }
-
-      if (placement->coordinate->coordinate.z) {
-        estimate_expression_bounds(placement->coordinate->coordinate.z, &z_min, &z_max, conservative_range);
+      
+      // Handle y coordinate (might be a range array [start, end])
+      if (y_expr->type == EXPR_ARRAY && y_expr->array.elements.count == 2) {
+        // It's a range
+        int y_start_min, y_start_max, y_end_min, y_end_max;
+        estimate_expression_bounds(y_expr->array.elements.items[0], &y_start_min, &y_start_max, conservative_range);
+        estimate_expression_bounds(y_expr->array.elements.items[1], &y_end_min, &y_end_max, conservative_range);
+        y_min = y_start_min < y_end_min ? y_start_min : y_end_min;
+        y_max = y_start_max > y_end_max ? y_start_max : y_end_max;
       } else {
-        z_min = z_max = 0;
+        estimate_expression_bounds(y_expr, &y_min, &y_max, conservative_range);
       }
-
-      // Handle z range if present
-      if (placement->coordinate->coordinate.z_end) {
-        int z_end_min, z_end_max;
-        estimate_expression_bounds(placement->coordinate->coordinate.z_end, &z_end_min, &z_end_max, conservative_range);
-        if (z_end_min < z_min) z_min = z_end_min;
-        if (z_end_max > z_max) z_max = z_end_max;
+      
+      // Handle z coordinate (might be a range array [start, end])
+      if (z_expr->type == EXPR_ARRAY && z_expr->array.elements.count == 2) {
+        // It's a range
+        int z_start_min, z_start_max, z_end_min, z_end_max;
+        estimate_expression_bounds(z_expr->array.elements.items[0], &z_start_min, &z_start_max, conservative_range);
+        estimate_expression_bounds(z_expr->array.elements.items[1], &z_end_min, &z_end_max, conservative_range);
+        z_min = z_start_min < z_end_min ? z_start_min : z_end_min;
+        z_max = z_start_max > z_end_max ? z_start_max : z_end_max;
+      } else {
+        estimate_expression_bounds(z_expr, &z_min, &z_max, conservative_range);
       }
 
       instruction_list_expand_bounds(list, x_min, y_min, z_min);

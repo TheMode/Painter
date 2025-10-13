@@ -95,6 +95,8 @@ final class ParserTest {
                 Arguments.of("#line .from=[0, 0, 0] .to=[5, 0, 0] .block=stone"),
                 Arguments.of("#column .height=5 .block=stone"),
                 Arguments.of("#column .to=12 .block=stone"),
+                Arguments.of("#ramp .from=[0, 0, 0] .to=[5, 5, 0] .block=stone"),
+                Arguments.of("#ramp .from=[0, 0, 0] .to=[10, 3, 0] .blocks=[stone, cobblestone, mossy_cobblestone]"),
                 Arguments.of("""
                         // Configuration
                         tower_height = 50
@@ -278,6 +280,14 @@ final class ParserTest {
         assertTrue(pi >= 0, "Expected block not present in palette: " + expectedBlockId);
         assertEquals(pi, blockIndex(section, x, y, z),
                 "Block mismatch at (" + x + "," + y + "," + z + ")");
+    }
+
+    private static String blockAt(PainterParser.SectionData section, int x, int y, int z) {
+        int idx = blockIndex(section, x, y, z);
+        if (idx < 0 || idx >= section.palette().length) {
+            return null;
+        }
+        return section.palette()[idx];
     }
 
     @PaintTest("""
@@ -1550,5 +1560,383 @@ final class ParserTest {
         // Second range on z=1
         assertBlockAt(section, 2, 0, 1, "gold_block");
         assertBlockAt(section, 7, 0, 1, "gold_block");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[5, 5, 0] .block=stone
+            """)
+    @DisplayName("#ramp macro creates diagonal staircase in X-Y plane")
+    void testRampDiagonalXY(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "stone", "air");
+        
+        // Ramp from (0,0,0) to (5,5,0) should create stairs
+        // Horizontal distance = 5, vertical = 5, so approximately 1 block per Y level
+        assertBlockAt(section, 0, 0, 0, "stone");
+        assertBlockAt(section, 5, 5, 0, "stone");
+        
+        // Check some intermediate points exist
+        boolean hasIntermediateBlocks = false;
+        for (int x = 1; x < 5; x++) {
+            for (int y = 1; y < 5; y++) {
+                String block = blockAt(section, x, y, 0);
+                if ("stone".equals(block)) {
+                    hasIntermediateBlocks = true;
+                    break;
+                }
+            }
+        }
+        assertTrue(hasIntermediateBlocks, "Ramp should have intermediate blocks");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[10, 0, 0] .block=stone
+            """)
+    @DisplayName("#ramp macro creates flat horizontal line when Y is constant")
+    void testRampHorizontalFlat(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "stone", "air");
+        
+        // Flat ramp should place blocks along X axis at y=0
+        for (int x = 0; x <= 10; x++) {
+            assertBlockAt(section, x, 0, 0, "stone");
+        }
+        assertBlockAt(section, 11, 0, 0, "air");
+        assertBlockAt(section, 5, 1, 0, "air");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[0, 10, 0] .block=stone
+            """)
+    @DisplayName("#ramp macro creates vertical column when horizontal distance is zero")
+    void testRampVerticalColumn(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "stone", "air");
+        
+        // Pure vertical should place blocks along Y axis
+        for (int y = 0; y <= 10; y++) {
+            assertBlockAt(section, 0, y, 0, "stone");
+        }
+        assertBlockAt(section, 1, 5, 0, "air");
+        assertBlockAt(section, 0, 11, 0, "air");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[0, 5, 5] .block=gold_block
+            """)
+    @DisplayName("#ramp macro creates diagonal staircase in Y-Z plane")
+    void testRampDiagonalYZ(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "gold_block", "air");
+        
+        // Ramp in Y-Z plane
+        assertBlockAt(section, 0, 0, 0, "gold_block");
+        assertBlockAt(section, 0, 5, 5, "gold_block");
+        
+        // Should have intermediate blocks
+        boolean hasIntermediateBlocks = false;
+        for (int z = 1; z < 5; z++) {
+            for (int y = 1; y < 5; y++) {
+                String block = blockAt(section, 0, y, z);
+                if ("gold_block".equals(block)) {
+                    hasIntermediateBlocks = true;
+                    break;
+                }
+            }
+        }
+        assertTrue(hasIntermediateBlocks, "Ramp should have intermediate blocks");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[8, 4, 8] .block=diamond_block
+            """)
+    @DisplayName("#ramp macro creates 3D diagonal staircase")
+    void testRamp3DDiagonal(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "diamond_block", "air");
+        
+        // 3D diagonal ramp
+        assertBlockAt(section, 0, 0, 0, "diamond_block");
+        assertBlockAt(section, 8, 4, 8, "diamond_block");
+        
+        // Count non-air blocks along potential path
+        int blockCount = 0;
+        for (int x = 0; x <= 8; x++) {
+            for (int y = 0; y <= 4; y++) {
+                for (int z = 0; z <= 8; z++) {
+                    if ("diamond_block".equals(blockAt(section, x, y, z))) {
+                        blockCount++;
+                    }
+                }
+            }
+        }
+        assertTrue(blockCount > 10, "3D ramp should have multiple blocks along path");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[8, 4, 0] .blocks=[stone, cobblestone, mossy_cobblestone, stone_bricks]
+            """)
+    @DisplayName("#ramp macro supports block gradient with array")
+    void testRampWithGradient(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "stone", "cobblestone", "mossy_cobblestone", "stone_bricks", "air");
+        
+        // Should use different blocks along the ramp
+        assertBlockAt(section, 0, 0, 0, "stone"); // Start
+        
+        // Check that multiple block types are used
+        boolean hasStone = false, hasCobble = false, hasMossy = false, hasBricks = false;
+        for (int x = 0; x <= 8; x++) {
+            for (int y = 0; y <= 4; y++) {
+                String block = blockAt(section, x, y, 0);
+                if ("stone".equals(block)) hasStone = true;
+                if ("cobblestone".equals(block)) hasCobble = true;
+                if ("mossy_cobblestone".equals(block)) hasMossy = true;
+                if ("stone_bricks".equals(block)) hasBricks = true;
+            }
+        }
+        assertTrue(hasStone, "Gradient should include stone");
+        assertTrue(hasBricks, "Gradient should include stone_bricks at end");
+    }
+
+    @PaintTest("""
+            #ramp .from=[14, 0, 0] .to=[18, 4, 0] .block=iron_block
+            """)
+    @DisplayName("#ramp macro spans section boundaries")
+    void testRampAcrossSections(ProgramContext ctx) {
+        PainterParser.SectionData section0 = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData section1 = ctx.generateSection(1, 0, 0);
+        
+        assertPaletteContains(section0, "iron_block", "air");
+        assertPaletteContains(section1, "iron_block", "air");
+        
+        // Ramp starts at x=14 (in section 0) and ends at x=18 (in section 1)
+        assertBlockAt(section0, 14, 0, 0, "iron_block");
+        assertBlockAt(section1, 2, 4, 0, "iron_block"); // x=18 is local 2 in section 1
+        
+        // Check continuity - should have blocks in both sections
+        boolean hasBlocksSection0 = false, hasBlocksSection1 = false;
+        for (int localX = 14; localX < 16; localX++) {
+            for (int y = 0; y <= 4; y++) {
+                if ("iron_block".equals(blockAt(section0, localX, y, 0))) {
+                    hasBlocksSection0 = true;
+                }
+            }
+        }
+        for (int localX = 0; localX <= 2; localX++) {
+            for (int y = 0; y <= 4; y++) {
+                if ("iron_block".equals(blockAt(section1, localX, y, 0))) {
+                    hasBlocksSection1 = true;
+                }
+            }
+        }
+        assertTrue(hasBlocksSection0, "Ramp should have blocks in first section");
+        assertTrue(hasBlocksSection1, "Ramp should have blocks in second section");
+    }
+
+    @PaintTest("""
+            #ramp .from=[5, 10, 0] .to=[0, 0, 0] .block=emerald_block
+            """)
+    @DisplayName("#ramp macro works with descending ramps")
+    void testRampDescending(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "emerald_block", "air");
+        
+        // Descending ramp
+        assertBlockAt(section, 5, 10, 0, "emerald_block");
+        assertBlockAt(section, 0, 0, 0, "emerald_block");
+        
+        // Should have intermediate blocks
+        int blockCount = 0;
+        for (int x = 0; x <= 5; x++) {
+            for (int y = 0; y <= 10; y++) {
+                if ("emerald_block".equals(blockAt(section, x, y, 0))) {
+                    blockCount++;
+                }
+            }
+        }
+        assertTrue(blockCount >= 5, "Descending ramp should have multiple blocks");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[3, 0, 3] .block=copper_block
+            """)
+    @DisplayName("#ramp macro creates horizontal diagonal in XZ plane")
+    void testRampHorizontalDiagonalXZ(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "copper_block", "air");
+        
+        // Horizontal diagonal at constant Y
+        assertBlockAt(section, 0, 0, 0, "copper_block");
+        assertBlockAt(section, 3, 0, 3, "copper_block");
+        
+        // Should create diagonal path
+        int blockCount = 0;
+        for (int x = 0; x <= 3; x++) {
+            for (int z = 0; z <= 3; z++) {
+                if ("copper_block".equals(blockAt(section, x, 0, z))) {
+                    blockCount++;
+                }
+            }
+        }
+        assertTrue(blockCount >= 4, "XZ diagonal should have at least 4 blocks");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[0, 0, 0] .block=oak_log
+            """)
+    @DisplayName("#ramp macro handles single block case")
+    void testRampSingleBlock(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "oak_log", "air");
+        
+        // Single block ramp
+        assertBlockAt(section, 0, 0, 0, "oak_log");
+        assertBlockAt(section, 1, 0, 0, "air");
+        assertBlockAt(section, 0, 1, 0, "air");
+    }
+
+    @PaintTest("""
+            #ramp .from=[0, 0, 0] .to=[20, 10, 5] .blocks=[oak_planks, spruce_planks, birch_planks, jungle_planks, acacia_planks, dark_oak_planks]
+            """)
+    @DisplayName("#ramp macro with long gradient and 3D path")
+    void testRampLongGradient3D(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "oak_planks", "dark_oak_planks", "air");
+        
+        // Long gradient ramp
+        assertBlockAt(section, 0, 0, 0, "oak_planks");
+        
+        // Should have variety of blocks
+        int uniqueBlocks = 0;
+        if (paletteIndex(section, "oak_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section, "spruce_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section, "birch_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section, "jungle_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section, "acacia_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section, "dark_oak_planks") >= 0) uniqueBlocks++;
+        
+        assertTrue(uniqueBlocks >= 3, "Long gradient should use multiple block types");
+    }
+
+    @PaintTest("""
+            // Multiple ramps in same section
+            #ramp .from=[0, 0, 0] .to=[5, 5, 0] .block=stone
+            #ramp .from=[10, 0, 0] .to=[15, 3, 0] .block=gold_block
+            #ramp .from=[0, 0, 10] .to=[0, 0, 15] .block=diamond_block
+            """)
+    @DisplayName("#ramp macro multiple ramps in same section")
+    void testMultipleRamps(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "stone", "gold_block", "diamond_block", "air");
+        
+        // First ramp
+        assertBlockAt(section, 0, 0, 0, "stone");
+        assertBlockAt(section, 5, 5, 0, "stone");
+        
+        // Second ramp
+        assertBlockAt(section, 10, 0, 0, "gold_block");
+        assertBlockAt(section, 15, 3, 0, "gold_block");
+        
+        // Third ramp (flat horizontal in Z)
+        assertBlockAt(section, 0, 0, 10, "diamond_block");
+        assertBlockAt(section, 0, 0, 15, "diamond_block");
+    }
+
+    @PaintTest("""
+            // Test with many different blocks to verify palette packing
+            // Place 20 different blocks at specific locations
+            [0, 0, 0] stone
+            [1, 0, 0] granite
+            [2, 0, 0] diorite
+            [3, 0, 0] andesite
+            [4, 0, 0] cobblestone
+            [5, 0, 0] oak_planks
+            [6, 0, 0] spruce_planks
+            [7, 0, 0] birch_planks
+            [8, 0, 0] jungle_planks
+            [9, 0, 0] acacia_planks
+            [10, 0, 0] dark_oak_planks
+            [11, 0, 0] crimson_planks
+            [12, 0, 0] warped_planks
+            [13, 0, 0] red_wool
+            [14, 0, 0] orange_wool
+            [15, 0, 0] yellow_wool
+            [0, 1, 0] lime_wool
+            [1, 1, 0] green_wool
+            [2, 1, 0] cyan_wool
+            [3, 1, 0] light_blue_wool
+            [4, 1, 0] blue_wool
+            [5, 1, 0] purple_wool
+            [6, 1, 0] magenta_wool
+            [7, 1, 0] pink_wool
+            [8, 1, 0] white_wool
+            [9, 1, 0] light_gray_wool
+            [10, 1, 0] gray_wool
+            [11, 1, 0] black_wool
+            [12, 1, 0] brown_wool
+            [13, 1, 0] glass
+            """)
+    @DisplayName("Large palette test - verify packing with 30+ blocks")
+    void testLargePalette(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        
+        System.out.println("Palette size: " + section.palette().length);
+        System.out.println("Bits per entry: " + section.bitsPerEntry());
+        System.out.println("Data length: " + section.data().length);
+        System.out.println("Palette: " + Arrays.toString(section.palette()));
+        
+        // Verify specific blocks are at their expected positions
+        assertBlockAt(section, 0, 0, 0, "stone");
+        assertBlockAt(section, 1, 0, 0, "granite");
+        assertBlockAt(section, 5, 0, 0, "oak_planks");
+        assertBlockAt(section, 10, 0, 0, "dark_oak_planks");
+        assertBlockAt(section, 15, 0, 0, "yellow_wool");
+        
+        // Verify blocks in second layer
+        assertBlockAt(section, 0, 1, 0, "lime_wool");
+        assertBlockAt(section, 5, 1, 0, "purple_wool");
+        assertBlockAt(section, 10, 1, 0, "gray_wool");
+        assertBlockAt(section, 13, 1, 0, "glass");
+        
+        // Verify some middle blocks
+        assertBlockAt(section, 7, 0, 0, "birch_planks");
+        assertBlockAt(section, 12, 0, 0, "warped_planks");
+        assertBlockAt(section, 3, 1, 0, "light_blue_wool");
+        assertBlockAt(section, 8, 1, 0, "white_wool");
+    }
+
+    @PaintTest("""
+            // Minimal test case: 17 blocks needs 5 bits, will trigger spanning at block 12
+            [0, 0, 0] b0
+            [1, 0, 0] b1
+            [2, 0, 0] b2
+            [3, 0, 0] b3
+            [4, 0, 0] b4
+            [5, 0, 0] b5
+            [6, 0, 0] b6
+            [7, 0, 0] b7
+            [8, 0, 0] b8
+            [9, 0, 0] b9
+            [10, 0, 0] b10
+            [11, 0, 0] b11
+            [12, 0, 0] b12
+            [13, 0, 0] b13
+            [14, 0, 0] b14
+            [15, 0, 0] b15
+            """)
+    @DisplayName("Minimal spanning test - 17 blocks with 5 bits per entry")
+    void testMinimalSpanning(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        
+        assertEquals(17, section.palette().length); // air + 16 blocks
+        assertEquals(5, section.bitsPerEntry());
+        
+        // Block 12 is the first to span across two longs (starts at bit 60)
+        // Verify all blocks are correctly placed
+        for (int i = 0; i <= 15; i++) {
+            String expectedBlock = "b" + i;
+            assertBlockAt(section, i, 0, 0, expectedBlock);
+        }
     }
 }

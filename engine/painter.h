@@ -72,7 +72,6 @@ typedef enum {
   EXPR_IDENTIFIER,
   EXPR_BINARY_OP,
   EXPR_UNARY_OP,
-  EXPR_COORDINATE,
   EXPR_FUNCTION_CALL,
   EXPR_ARRAY,
 } ExpressionType;
@@ -109,15 +108,6 @@ typedef struct Expression {
       UnaryOperator op;
       Expression *operand;
     } unary;
-    struct {
-      Expression *x;
-      Expression *y;
-      Expression *z;
-      // Range support: if x_end is non-NULL, x is start of range and x_end is end
-      Expression *x_end;
-      Expression *y_end;
-      Expression *z_end;
-    } coordinate;
     struct {
       char name[MAX_TOKEN_VALUE_LENGTH];
       ExpressionList args;
