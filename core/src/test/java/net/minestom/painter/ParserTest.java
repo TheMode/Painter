@@ -161,8 +161,34 @@ final class ParserTest {
                           [0, 3, 1] oak_leaves
                           [0, 4, 0] oak_leaves
                         }
-                        """
-                )
+                        """),
+                // Range syntax tests
+                Arguments.of("[0..5, 0, 0] stone"),
+                Arguments.of("[0..5, 0] stone"),
+                Arguments.of("""
+                        x = 2
+                        [x..x+5, 0, 0] gold_block
+                        """),
+                Arguments.of("[0, 0..3, 0] diamond_block"),
+                Arguments.of("[0, 0, 0..4] emerald_block"),
+                Arguments.of("[0..2, 0..2, 0] iron_block"),
+                Arguments.of("[0..3, 0..3, 0..3] copper_block"),
+                Arguments.of("""
+                        start = 1
+                        end = 5
+                        [start..end, 0, 0] oak_planks
+                        """),
+                Arguments.of("""
+                        for i in 0..3 {
+                          [i*2..i*2+2, 0, 0] red_concrete
+                        }
+                        """),
+                Arguments.of("[5..2, 0, 0] yellow_concrete"), // Reverse range
+                Arguments.of("[-5..-2, 0, 0] blue_concrete"), // Negative range
+                Arguments.of("""
+                        x = 10
+                        [x..x*2, 0, 0] green_concrete
+                        """)
         );
     }
 
@@ -1316,5 +1342,189 @@ final class ParserTest {
             assertTrue(yPositions.size() > 1,
                     "Scaled noise should produce varied Y positions, found: " + yPositions);
         }
+    }
+
+    @PaintTest("[0..5, 0, 0] stone")
+    @DisplayName("Basic range syntax on X axis")
+    void testBasicRangeX(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "stone", "air");
+        
+        // Should place blocks at x = 0, 1, 2, 3, 4, 5 (inclusive)
+        assertBlockAt(section, 0, 0, 0, "stone");
+        assertBlockAt(section, 1, 0, 0, "stone");
+        assertBlockAt(section, 2, 0, 0, "stone");
+        assertBlockAt(section, 3, 0, 0, "stone");
+        assertBlockAt(section, 4, 0, 0, "stone");
+        assertBlockAt(section, 5, 0, 0, "stone");
+        assertBlockAt(section, 6, 0, 0, "air");
+    }
+
+    @PaintTest("[0, 0..4, 0] gold_block")
+    @DisplayName("Range syntax on Y axis")
+    void testRangeY(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "gold_block", "air");
+        
+        // Should place blocks at y = 0, 1, 2, 3, 4 (inclusive)
+        assertBlockAt(section, 0, 0, 0, "gold_block");
+        assertBlockAt(section, 0, 1, 0, "gold_block");
+        assertBlockAt(section, 0, 2, 0, "gold_block");
+        assertBlockAt(section, 0, 3, 0, "gold_block");
+        assertBlockAt(section, 0, 4, 0, "gold_block");
+        assertBlockAt(section, 0, 5, 0, "air");
+    }
+
+    @PaintTest("[0, 0, 2..6] diamond_block")
+    @DisplayName("Range syntax on Z axis")
+    void testRangeZ(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "diamond_block", "air");
+        
+        // Should place blocks at z = 2, 3, 4, 5, 6 (inclusive)
+        assertBlockAt(section, 0, 0, 2, "diamond_block");
+        assertBlockAt(section, 0, 0, 3, "diamond_block");
+        assertBlockAt(section, 0, 0, 4, "diamond_block");
+        assertBlockAt(section, 0, 0, 5, "diamond_block");
+        assertBlockAt(section, 0, 0, 6, "diamond_block");
+        assertBlockAt(section, 0, 0, 1, "air");
+        assertBlockAt(section, 0, 0, 7, "air");
+    }
+
+    @PaintTest("""
+            x = 2
+            [x..x+3, 0, 0] emerald_block
+            """)
+    @DisplayName("Range with expressions using variables")
+    void testRangeWithExpressions(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "emerald_block", "air");
+        
+        // x=2, so range is 2..5 (x+3)
+        assertBlockAt(section, 2, 0, 0, "emerald_block");
+        assertBlockAt(section, 3, 0, 0, "emerald_block");
+        assertBlockAt(section, 4, 0, 0, "emerald_block");
+        assertBlockAt(section, 5, 0, 0, "emerald_block");
+        assertBlockAt(section, 1, 0, 0, "air");
+        assertBlockAt(section, 6, 0, 0, "air");
+    }
+
+    @PaintTest("[0..2, 0..2, 0] iron_block")
+    @DisplayName("Multi-axis range creates a 2D area")
+    void testMultiAxisRange2D(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "iron_block", "air");
+        
+        // Should create a 3x3 grid on the Y=0 plane
+        for (int x = 0; x <= 2; x++) {
+            for (int y = 0; y <= 2; y++) {
+                assertBlockAt(section, x, y, 0, "iron_block");
+            }
+        }
+        assertBlockAt(section, 3, 0, 0, "air");
+        assertBlockAt(section, 0, 3, 0, "air");
+    }
+
+    @PaintTest("[1..3, 1..3, 1..3] copper_block")
+    @DisplayName("Triple-axis range creates a 3D volume")
+    void testMultiAxisRange3D(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "copper_block", "air");
+        
+        // Should create a 3x3x3 cube
+        for (int x = 1; x <= 3; x++) {
+            for (int y = 1; y <= 3; y++) {
+                for (int z = 1; z <= 3; z++) {
+                    assertBlockAt(section, x, y, z, "copper_block");
+                }
+            }
+        }
+        assertBlockAt(section, 0, 1, 1, "air");
+        assertBlockAt(section, 4, 2, 2, "air");
+    }
+
+    @PaintTest("[5..2, 0, 0] red_concrete")
+    @DisplayName("Reverse range (descending) works correctly")
+    void testReverseRange(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "red_concrete", "air");
+        
+        // Range from 5 down to 2 (inclusive)
+        assertBlockAt(section, 5, 0, 0, "red_concrete");
+        assertBlockAt(section, 4, 0, 0, "red_concrete");
+        assertBlockAt(section, 3, 0, 0, "red_concrete");
+        assertBlockAt(section, 2, 0, 0, "red_concrete");
+        assertBlockAt(section, 1, 0, 0, "air");
+        assertBlockAt(section, 6, 0, 0, "air");
+    }
+
+    @PaintTest("[-5..-2, 0, 0] blue_concrete")
+    @DisplayName("Negative range works correctly")
+    void testNegativeRange(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(-1, 0, 0);
+        assertPaletteContains(section, "blue_concrete", "air");
+        
+        // Section (-1,0,0) covers world X from -16 to -1
+        // We're placing at X = -5, -4, -3, -2
+        // In local coords: -5 - (-16) = 11, -4 - (-16) = 12, -3 - (-16) = 13, -2 - (-16) = 14
+        assertBlockAt(section, 11, 0, 0, "blue_concrete");
+        assertBlockAt(section, 12, 0, 0, "blue_concrete");
+        assertBlockAt(section, 13, 0, 0, "blue_concrete");
+        assertBlockAt(section, 14, 0, 0, "blue_concrete");
+    }
+
+    @PaintTest("""
+            for i in 0..3 {
+              [i*3..i*3+2, 0, 0] green_concrete
+            }
+            """)
+    @DisplayName("Range with complex expressions in loops")
+    void testRangeInLoop(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "green_concrete", "air");
+        
+        // i=0: [0..2, 0, 0] -> x=0,1,2
+        // i=1: [3..5, 0, 0] -> x=3,4,5
+        // i=2: [6..8, 0, 0] -> x=6,7,8
+        assertBlockAt(section, 0, 0, 0, "green_concrete");
+        assertBlockAt(section, 2, 0, 0, "green_concrete");
+        assertBlockAt(section, 3, 0, 0, "green_concrete");
+        assertBlockAt(section, 5, 0, 0, "green_concrete");
+        assertBlockAt(section, 6, 0, 0, "green_concrete");
+        assertBlockAt(section, 8, 0, 0, "green_concrete");
+        assertBlockAt(section, 9, 0, 0, "air");
+    }
+
+    @PaintTest("""
+            x = 10
+            [x..x*2, 0, 0] yellow_concrete
+            """)
+    @DisplayName("Range with multiplication expression")
+    void testRangeWithMultiplication(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "yellow_concrete", "air");
+        
+        // x=10, so range is 10..20
+        assertBlockAt(section, 10, 0, 0, "yellow_concrete");
+        assertBlockAt(section, 15, 0, 0, "yellow_concrete");
+        assertBlockAt(section, 9, 0, 0, "air");
+    }
+
+    @PaintTest("""
+            [0..5, 0, 0] stone
+            [2..7, 0, 1] gold_block
+            """)
+    @DisplayName("Overlapping ranges on different Z coordinates")
+    void testOverlappingRanges(ProgramContext ctx) {
+        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
+        assertPaletteContains(section, "stone", "gold_block", "air");
+        
+        // First range on z=0
+        assertBlockAt(section, 0, 0, 0, "stone");
+        assertBlockAt(section, 5, 0, 0, "stone");
+        
+        // Second range on z=1
+        assertBlockAt(section, 2, 0, 1, "gold_block");
+        assertBlockAt(section, 7, 0, 1, "gold_block");
     }
 }

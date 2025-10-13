@@ -112,6 +112,10 @@ typedef struct Expression {
       Expression *x;
       Expression *y;
       Expression *z;
+      // Range support: if x_end is non-NULL, x is start of range and x_end is end
+      Expression *x_end;
+      Expression *y_end;
+      Expression *z_end;
     } coordinate;
     struct {
       char name[MAX_TOKEN_VALUE_LENGTH];

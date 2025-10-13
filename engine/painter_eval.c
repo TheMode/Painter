@@ -147,15 +147,41 @@ static bool instruction_might_affect_section(Instruction *instr, ExecutionState 
 
   switch (instr->type) {
   case INSTR_BLOCK_PLACEMENT: {
-    int world_x, world_y, world_z;
-    if (!evaluate_block_position(&instr->block_placement, state, origin_x, origin_y, origin_z, &world_x, &world_y, &world_z)) {
+    const BlockPlacement *placement = &instr->block_placement;
+    const Expression *coord = placement->coordinate;
+    
+    if (!coord || coord->type != EXPR_COORDINATE) {
       return false;
     }
-    // Fast bounds check using unsigned comparison trick
-    const unsigned local_x = world_x - state->base_x;
-    const unsigned local_y = world_y - state->base_y;
-    const unsigned local_z = world_z - state->base_z;
-    return (local_x < 16u) && (local_y < 16u) && (local_z < 16u);
+
+    // Evaluate base coordinates
+    const int base_x = (int)painter_evaluate_expression(coord->coordinate.x, state);
+    const int base_y = coord->coordinate.y ? (int)painter_evaluate_expression(coord->coordinate.y, state) : 0;
+    const int base_z = coord->coordinate.z ? (int)painter_evaluate_expression(coord->coordinate.z, state) : 0;
+
+    // Evaluate range ends (if they exist)
+    const int end_x = coord->coordinate.x_end ? (int)painter_evaluate_expression(coord->coordinate.x_end, state) : base_x;
+    const int end_y = coord->coordinate.y_end ? (int)painter_evaluate_expression(coord->coordinate.y_end, state) : base_y;
+    const int end_z = coord->coordinate.z_end ? (int)painter_evaluate_expression(coord->coordinate.z_end, state) : base_z;
+
+    // Calculate world-space bounding box
+    const int world_min_x = origin_x + (base_x < end_x ? base_x : end_x);
+    const int world_max_x = origin_x + (base_x > end_x ? base_x : end_x);
+    const int world_min_y = origin_y + (base_y < end_y ? base_y : end_y);
+    const int world_max_y = origin_y + (base_y > end_y ? base_y : end_y);
+    const int world_min_z = origin_z + (base_z < end_z ? base_z : end_z);
+    const int world_max_z = origin_z + (base_z > end_z ? base_z : end_z);
+
+    const int sec_min_x = state->base_x;
+    const int sec_max_x = state->base_x + 15;
+    const int sec_min_y = state->base_y;
+    const int sec_max_y = state->base_y + 15;
+    const int sec_min_z = state->base_z;
+    const int sec_max_z = state->base_z + 15;
+
+    // Optimized AABB intersection test
+    return !(world_max_x < sec_min_x || world_min_x > sec_max_x || world_max_y < sec_min_y || world_min_y > sec_max_y ||
+             world_max_z < sec_min_z || world_min_z > sec_max_z);
   }
   case INSTR_OCCURRENCE: {
     const Occurrence *occ = &instr->occurrence;
@@ -277,33 +303,60 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
 
   switch (instr->type) {
   case INSTR_BLOCK_PLACEMENT: {
-    int world_x, world_y, world_z;
-    if (!evaluate_block_position(&instr->block_placement, state, origin_x, origin_y, origin_z, &world_x, &world_y, &world_z)) {
+    const BlockPlacement *placement = &instr->block_placement;
+    const Expression *coord = placement->coordinate;
+    
+    if (!coord || coord->type != EXPR_COORDINATE) {
       break;
     }
 
-    // Combined bounds check using unsigned arithmetic
-    const unsigned local_x = world_x - state->base_x;
-    const unsigned local_y = world_y - state->base_y;
-    const unsigned local_z = world_z - state->base_z;
-
-    if (local_x >= 16u || local_y >= 16u || local_z >= 16u) {
-      break;
-    }
-
-    const char *block_string = instr->block_placement.block_identifier;
+    const char *block_string = placement->block_identifier;
     if (!block_string[0]) {
       break;
     }
 
+    // Evaluate base coordinates
+    const int base_x = (int)painter_evaluate_expression(coord->coordinate.x, state);
+    const int base_y = coord->coordinate.y ? (int)painter_evaluate_expression(coord->coordinate.y, state) : 0;
+    const int base_z = coord->coordinate.z ? (int)painter_evaluate_expression(coord->coordinate.z, state) : 0;
+
+    // Evaluate range ends (if they exist)
+    const int end_x = coord->coordinate.x_end ? (int)painter_evaluate_expression(coord->coordinate.x_end, state) : base_x;
+    const int end_y = coord->coordinate.y_end ? (int)painter_evaluate_expression(coord->coordinate.y_end, state) : base_y;
+    const int end_z = coord->coordinate.z_end ? (int)painter_evaluate_expression(coord->coordinate.z_end, state) : base_z;
+
+    // Determine iteration direction for each axis
+    const int step_x = (end_x >= base_x) ? 1 : -1;
+    const int step_y = (end_y >= base_y) ? 1 : -1;
+    const int step_z = (end_z >= base_z) ? 1 : -1;
+
+    // Get or add palette index once
     const int palette_index = painter_palette_get_or_add(state, block_string);
     if (palette_index < 0) {
       break;
     }
 
-    // Optimized block index calculation
-    const int block_index = (local_y << 8) | (local_z << 4) | local_x;
-    state->block_indices[block_index] = palette_index;
+    // Iterate over the range (inclusive on both ends)
+    for (int offset_x = base_x; step_x > 0 ? offset_x <= end_x : offset_x >= end_x; offset_x += step_x) {
+      for (int offset_y = base_y; step_y > 0 ? offset_y <= end_y : offset_y >= end_y; offset_y += step_y) {
+        for (int offset_z = base_z; step_z > 0 ? offset_z <= end_z : offset_z >= end_z; offset_z += step_z) {
+          const int world_x = origin_x + offset_x;
+          const int world_y = origin_y + offset_y;
+          const int world_z = origin_z + offset_z;
+
+          // Combined bounds check using unsigned arithmetic
+          const unsigned local_x = world_x - state->base_x;
+          const unsigned local_y = world_y - state->base_y;
+          const unsigned local_z = world_z - state->base_z;
+
+          if (local_x < 16u && local_y < 16u && local_z < 16u) {
+            // Optimized block index calculation
+            const int block_index = (local_y << 8) | (local_z << 4) | local_x;
+            state->block_indices[block_index] = palette_index;
+          }
+        }
+      }
+    }
     break;
   }
 

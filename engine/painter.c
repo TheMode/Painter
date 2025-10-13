@@ -517,10 +517,19 @@ static Expression *parse_coordinate(Parser *parser) {
   coord->type = EXPR_COORDINATE;
   coord->coordinate.y = NULL;
   coord->coordinate.z = NULL;
+  coord->coordinate.x_end = NULL;
+  coord->coordinate.y_end = NULL;
+  coord->coordinate.z_end = NULL;
 
   // Parse first value (always x)
   coord->coordinate.x = parse_expression(parser);
   if (!coord->coordinate.x) goto error;
+
+  // Check for range operator (..)
+  if (consume(TOKEN_DOT_DOT)) {
+    coord->coordinate.x_end = parse_expression(parser);
+    if (!coord->coordinate.x_end) goto error;
+  }
 
   if (!expect_token(parser, TOKEN_COMMA, "Expected ',' between coordinate values")) {
     goto error;
@@ -530,14 +539,32 @@ static Expression *parse_coordinate(Parser *parser) {
   Expression *second = parse_expression(parser);
   if (!second) goto error;
 
+  // Check for range operator on second value
+  Expression *second_end = NULL;
+  if (consume(TOKEN_DOT_DOT)) {
+    second_end = parse_expression(parser);
+    if (!second_end) {
+      expression_free(second);
+      goto error;
+    }
+  }
+
   if (consume(TOKEN_COMMA)) {
     // Three values provided: [x, y, z]
     coord->coordinate.y = second;
+    coord->coordinate.y_end = second_end;
     coord->coordinate.z = parse_expression(parser);
     if (!coord->coordinate.z) goto error;
+
+    // Check for range operator on third value
+    if (consume(TOKEN_DOT_DOT)) {
+      coord->coordinate.z_end = parse_expression(parser);
+      if (!coord->coordinate.z_end) goto error;
+    }
   } else {
     // Two values provided: [x, z], y defaults to 0
     coord->coordinate.z = second;
+    coord->coordinate.z_end = second_end;
   }
 
   if (!expect_token(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after coordinate")) {
@@ -548,8 +575,11 @@ static Expression *parse_coordinate(Parser *parser) {
 
 error:
   expression_free(coord->coordinate.x);
+  expression_free(coord->coordinate.x_end);
   expression_free(coord->coordinate.y);
+  expression_free(coord->coordinate.y_end);
   expression_free(coord->coordinate.z);
+  expression_free(coord->coordinate.z_end);
   free(coord);
   return NULL;
 }
@@ -1358,6 +1388,9 @@ void expression_free(Expression *expr) {
     expression_free(expr->coordinate.x);
     expression_free(expr->coordinate.y);
     expression_free(expr->coordinate.z);
+    expression_free(expr->coordinate.x_end);
+    expression_free(expr->coordinate.y_end);
+    expression_free(expr->coordinate.z_end);
     break;
   case EXPR_FUNCTION_CALL: expression_list_destroy(&expr->function_call.args); break;
   default: break;
@@ -1866,16 +1899,40 @@ static void update_instruction_bounds(InstructionList *list, const Instruction *
       int x_min, x_max, y_min, y_max, z_min, z_max;
       estimate_expression_bounds(placement->coordinate->coordinate.x, &x_min, &x_max, conservative_range);
 
+      // Handle x range if present
+      if (placement->coordinate->coordinate.x_end) {
+        int x_end_min, x_end_max;
+        estimate_expression_bounds(placement->coordinate->coordinate.x_end, &x_end_min, &x_end_max, conservative_range);
+        if (x_end_min < x_min) x_min = x_end_min;
+        if (x_end_max > x_max) x_max = x_end_max;
+      }
+
       if (placement->coordinate->coordinate.y) {
         estimate_expression_bounds(placement->coordinate->coordinate.y, &y_min, &y_max, conservative_range);
       } else {
         y_min = y_max = 0;
       }
 
+      // Handle y range if present
+      if (placement->coordinate->coordinate.y_end) {
+        int y_end_min, y_end_max;
+        estimate_expression_bounds(placement->coordinate->coordinate.y_end, &y_end_min, &y_end_max, conservative_range);
+        if (y_end_min < y_min) y_min = y_end_min;
+        if (y_end_max > y_max) y_max = y_end_max;
+      }
+
       if (placement->coordinate->coordinate.z) {
         estimate_expression_bounds(placement->coordinate->coordinate.z, &z_min, &z_max, conservative_range);
       } else {
         z_min = z_max = 0;
+      }
+
+      // Handle z range if present
+      if (placement->coordinate->coordinate.z_end) {
+        int z_end_min, z_end_max;
+        estimate_expression_bounds(placement->coordinate->coordinate.z_end, &z_end_min, &z_end_max, conservative_range);
+        if (z_end_min < z_min) z_min = z_end_min;
+        if (z_end_max > z_max) z_max = z_end_max;
       }
 
       instruction_list_expand_bounds(list, x_min, y_min, z_min);
