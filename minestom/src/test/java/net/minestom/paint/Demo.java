@@ -81,9 +81,8 @@ public final class Demo {
         boolean loadCommands = Boolean.parseBoolean(System.getProperty("painter.enableLoadCommands", "true"));
         String bindAddress = System.getProperty("painter.bindAddress", "0.0.0.0");
         int port = Integer.parseInt(System.getProperty("painter.port", "25565"));
-        int maxPlayers = Integer.parseInt(System.getProperty("painter.maxPlayers", "20"));
 
-        return new DemoConfig(program, fileWatcher, loadCommands, bindAddress, port, maxPlayers);
+        return new DemoConfig(program, fileWatcher, loadCommands, bindAddress, port);
     }
 
     private static InstanceContainer createInstance(InstanceManager manager) {
@@ -189,10 +188,10 @@ public final class Demo {
     private static void registerEventHandlers(InstanceContainer instance, DemoConfig config, PainterExperience experience) {
         GlobalEventHandler events = MinecraftServer.getGlobalEventHandler();
         events.addListener(ServerListPingEvent.class, event -> {
-            int online = MinecraftServer.getConnectionManager().getOnlinePlayers().size();
+            final int online = MinecraftServer.getConnectionManager().getOnlinePlayers().size();
             event.setStatus(Status.builder()
                     .description(SHOWCASE_MOTD)
-                    .playerInfo(config.maxPlayers(), online)
+                    .playerInfo(online, 0)
                     .build());
         });
         events.addListener(AsyncPlayerConfigurationEvent.class, event -> {
@@ -227,8 +226,7 @@ public final class Demo {
             Path paintFile,
             boolean enableFileWatcher,
             boolean enableLoadCommands,
-            String bindAddress, int port,
-            int maxPlayers
+            String bindAddress, int port
     ) {
     }
 }
