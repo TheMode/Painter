@@ -97,8 +97,6 @@ public final class Demo {
         String program = Files.readString(paintFile);
         PaintGenerator generator = PaintGenerator.load(program);
         instance.setGenerator(generator);
-        instance.loadChunk(0, 0).join();
-        LOGGER.info("Initial generator loaded from {}", paintFile);
         experience.initialize();
         experience.notifyReloadSuccess("initial program");
 
