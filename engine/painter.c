@@ -235,6 +235,7 @@ static Expression *parse_additive(Parser *parser);
 static Expression *parse_multiplicative(Parser *parser);
 static Expression *parse_comparison(Parser *parser);
 static Expression *parse_coordinate(Parser *parser);
+static Expression *parse_array_or_coordinate(Parser *parser);
 static Expression *parse_function_call(Parser *parser, const char *name);
 static Instruction *parse_instruction(Parser *parser);
 static BlockPlacement parse_block_placement(Parser *parser);
@@ -384,9 +385,9 @@ static Expression *parse_primary(Parser *parser) {
     return expr;
   }
 
-  // Handle coordinate [x, y, z]
+  // Handle array literals [expr, expr, ...]
   if (consume(TOKEN_LEFT_BRACKET)) {
-    return parse_coordinate(parser);
+    return parse_array_or_coordinate(parser);
   }
 
   // Handle parenthesized expressions
@@ -617,6 +618,51 @@ static Expression *parse_function_call(Parser *parser, const char *name) {
   }
 
   return expr;
+}
+
+// Parse array or coordinate based on context
+// Arrays: [expr, expr, ...] - arbitrary number of elements
+// Coordinates: [x, y?, z?] with optional ranges (..)
+static Expression *parse_array_or_coordinate(Parser *parser) {
+  // [ is already consumed
+  // We need to look ahead to determine if this is an array or coordinate
+  // Strategy: Parse as array first, check if it matches coordinate pattern
+  
+  Expression *array_expr = alloc_or_error(parser, sizeof(Expression), "Out of memory");
+  if (!array_expr) return NULL;
+  
+  array_expr->type = EXPR_ARRAY;
+  expression_list_init(&array_expr->array.elements);
+  
+  // Handle empty array []
+  if (peek_type() == TOKEN_RIGHT_BRACKET) {
+    consume(TOKEN_RIGHT_BRACKET);
+    return array_expr;
+  }
+  
+  // Parse elements
+  while (true) {
+    Expression *elem = parse_expression(parser);
+    if (!elem) {
+      expression_free(array_expr);
+      return NULL;
+    }
+    
+    if (!expression_list_push(parser, &array_expr->array.elements, elem)) {
+      expression_free(elem);
+      expression_free(array_expr);
+      return NULL;
+    }
+    
+    if (!consume(TOKEN_COMMA)) break;
+  }
+  
+  if (!expect_token(parser, TOKEN_RIGHT_BRACKET, "Expected ']' after array elements")) {
+    expression_free(array_expr);
+    return NULL;
+  }
+  
+  return array_expr;
 } // Instruction parsing
 static BlockPlacement parse_block_placement(Parser *parser) {
   BlockPlacement placement = {0};
@@ -1369,6 +1415,17 @@ static Expression *expression_copy(const Expression *expr) {
       }
     }
     break;
+  case EXPR_ARRAY:
+    expression_list_init(&copy->array.elements);
+    for (size_t i = 0; i < expr->array.elements.count; i++) {
+      Expression *elem_copy = expression_copy(expr->array.elements.items[i]);
+      if (!elem_copy || !expression_list_push(NULL, &copy->array.elements, elem_copy)) {
+        expression_free(elem_copy);
+        expression_free(copy);
+        return NULL;
+      }
+    }
+    break;
   }
 
   return copy;
@@ -1393,6 +1450,7 @@ void expression_free(Expression *expr) {
     expression_free(expr->coordinate.z_end);
     break;
   case EXPR_FUNCTION_CALL: expression_list_destroy(&expr->function_call.args); break;
+  case EXPR_ARRAY: expression_list_destroy(&expr->array.elements); break;
   default: break;
   }
 
@@ -1669,6 +1727,9 @@ void context_free(VariableContext *ctx) {
     if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
       palette_definition_destroy(ctx->variables[i].v.palette);
       ctx->variables[i].v.palette = NULL;
+    } else if (ctx->variables[i].type == VAR_ARRAY && ctx->variables[i].v.array.items) {
+      free(ctx->variables[i].v.array.items);
+      ctx->variables[i].v.array.items = NULL;
     }
   }
   free(ctx->variables);
@@ -1733,6 +1794,56 @@ PaletteDefinition *context_get_palette(VariableContext *ctx, const char *name) {
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0 && ctx->variables[i].type == VAR_PALETTE) {
       return ctx->variables[i].v.palette;
+    }
+  }
+  return NULL;
+}
+
+void context_set_array(VariableContext *ctx, const char *name, const double *items, size_t count) {
+  if (!ctx || !name) return;
+
+  // Allocate array storage
+  double *copy = NULL;
+  if (count > 0 && items) {
+    copy = malloc(sizeof(double) * count);
+    if (!copy) return;
+    memcpy(copy, items, sizeof(double) * count);
+  }
+
+  // Find existing variable
+  for (size_t i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0) {
+      // Free old data if needed
+      if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
+        palette_definition_destroy(ctx->variables[i].v.palette);
+      } else if (ctx->variables[i].type == VAR_ARRAY && ctx->variables[i].v.array.items) {
+        free(ctx->variables[i].v.array.items);
+      }
+      ctx->variables[i].type = VAR_ARRAY;
+      ctx->variables[i].v.array.items = copy;
+      ctx->variables[i].v.array.count = count;
+      return;
+    }
+  }
+
+  // Add new variable
+  if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity, ctx->variable_count, sizeof(*ctx->variables))) {
+    free(copy);
+    return;
+  }
+
+  Variable *variable = &ctx->variables[ctx->variable_count++];
+  safe_strncpy(variable->name, name, MAX_TOKEN_VALUE_LENGTH);
+  variable->type = VAR_ARRAY;
+  variable->v.array.items = copy;
+  variable->v.array.count = count;
+}
+
+ArrayValue *context_get_array(VariableContext *ctx, const char *name) {
+  if (!ctx || !name) return NULL;
+  for (size_t i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0 && ctx->variables[i].type == VAR_ARRAY) {
+      return &ctx->variables[i].v.array;
     }
   }
   return NULL;

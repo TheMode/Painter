@@ -74,6 +74,7 @@ typedef enum {
   EXPR_UNARY_OP,
   EXPR_COORDINATE,
   EXPR_FUNCTION_CALL,
+  EXPR_ARRAY,
 } ExpressionType;
 
 typedef enum {
@@ -121,6 +122,9 @@ typedef struct Expression {
       char name[MAX_TOKEN_VALUE_LENGTH];
       ExpressionList args;
     } function_call;
+    struct {
+      ExpressionList elements;
+    } array;
   };
 } Expression;
 
@@ -261,16 +265,24 @@ typedef struct {
   int data_size;      // Number of uint64_t elements in data array
 } Section;
 
+// Array value storage
+typedef struct ArrayValue {
+  double *items;
+  size_t count;
+} ArrayValue;
+
 // Variable context for tracking values during execution
 typedef struct Variable {
   char name[MAX_TOKEN_VALUE_LENGTH];
   enum {
     VAR_NUMBER,
     VAR_PALETTE,
+    VAR_ARRAY,
   } type;
   union {
     double value;
     PaletteDefinition *palette;
+    ArrayValue array;
   } v;
 } Variable;
 
@@ -411,6 +423,8 @@ PAINTER_API void context_set(VariableContext *ctx, const char *name, double valu
 PAINTER_API double context_get(VariableContext *ctx, const char *name);
 PAINTER_API void context_set_palette(VariableContext *ctx, const char *name, const PaletteDefinition *definition);
 PAINTER_API PaletteDefinition *context_get_palette(VariableContext *ctx, const char *name);
+PAINTER_API void context_set_array(VariableContext *ctx, const char *name, const double *items, size_t count);
+PAINTER_API ArrayValue *context_get_array(VariableContext *ctx, const char *name);
 
 // Helper function to get named argument by name
 PAINTER_API Expression *named_arg_get(const NamedArgumentList *args, const char *name);

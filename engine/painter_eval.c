@@ -136,6 +136,7 @@ double painter_evaluate_expression(const Expression *expr, ExecutionState *state
     return entry->function ? entry->function(arg_values, arg_count) : 0.0;
   }
   case EXPR_COORDINATE: break;
+  case EXPR_ARRAY: break; // Arrays don't evaluate to a single number
   }
 
   return 0.0;
@@ -416,8 +417,29 @@ void process_instruction(Instruction *instr, ExecutionState *state, int origin_x
       context_set_palette(state->variables, instr->assignment.name, instr->assignment.palette_definition);
     } else {
       Assignment *assignment = &instr->assignment;
-      double value = painter_evaluate_expression(assignment->value, state);
-      context_set(state->variables, assignment->name, value);
+      
+      // Check if the value is an array expression
+      if (assignment->value && assignment->value->type == EXPR_ARRAY) {
+        // Evaluate each array element
+        size_t count = assignment->value->array.elements.count;
+        if (count > 0) {
+          double *values = malloc(sizeof(double) * count);
+          if (values) {
+            for (size_t i = 0; i < count; i++) {
+              values[i] = painter_evaluate_expression(assignment->value->array.elements.items[i], state);
+            }
+            context_set_array(state->variables, assignment->name, values, count);
+            free(values);
+          }
+        } else {
+          // Empty array
+          context_set_array(state->variables, assignment->name, NULL, 0);
+        }
+      } else {
+        // Regular numeric value
+        double value = painter_evaluate_expression(assignment->value, state);
+        context_set(state->variables, assignment->name, value);
+      }
     }
     break;
   }
@@ -748,18 +770,37 @@ bool painter_eval_coordinate_argument(const Expression *expr, ExecutionState *st
     return false;
   }
 
-  if (expr->type != EXPR_COORDINATE || !expr->coordinate.x) {
-    return false;
+  // Handle EXPR_COORDINATE (legacy coordinate syntax)
+  if (expr->type == EXPR_COORDINATE && expr->coordinate.x) {
+    const double x_val = painter_evaluate_expression(expr->coordinate.x, state);
+    const double y_val = expr->coordinate.y ? painter_evaluate_expression(expr->coordinate.y, state) : 0.0;
+    const double z_val = expr->coordinate.z ? painter_evaluate_expression(expr->coordinate.z, state) : 0.0;
+
+    *out_x = state->current_origin_x + (int)llround(x_val);
+    *out_y = state->current_origin_y + (int)llround(y_val);
+    *out_z = state->current_origin_z + (int)llround(z_val);
+    return true;
   }
 
-  const double x_val = painter_evaluate_expression(expr->coordinate.x, state);
-  const double y_val = expr->coordinate.y ? painter_evaluate_expression(expr->coordinate.y, state) : 0.0;
-  const double z_val = expr->coordinate.z ? painter_evaluate_expression(expr->coordinate.z, state) : 0.0;
+  // Handle EXPR_ARRAY as coordinate (for macro arguments like .from=[0, 0, 0])
+  if (expr->type == EXPR_ARRAY) {
+    size_t count = expr->array.elements.count;
+    if (count < 2 || count > 3) {
+      return false; // Arrays must have 2 or 3 elements to be used as coordinates
+    }
 
-  *out_x = state->current_origin_x + (int)llround(x_val);
-  *out_y = state->current_origin_y + (int)llround(y_val);
-  *out_z = state->current_origin_z + (int)llround(z_val);
-  return true;
+    const double x_val = painter_evaluate_expression(expr->array.elements.items[0], state);
+    const double y_val = count == 3 ? painter_evaluate_expression(expr->array.elements.items[1], state) : 0.0;
+    const double z_val = count == 3 ? painter_evaluate_expression(expr->array.elements.items[2], state) 
+                                    : painter_evaluate_expression(expr->array.elements.items[1], state);
+
+    *out_x = state->current_origin_x + (int)llround(x_val);
+    *out_y = state->current_origin_y + (int)llround(y_val);
+    *out_z = state->current_origin_z + (int)llround(z_val);
+    return true;
+  }
+
+  return false;
 }
 
 bool painter_eval_positive_component_or_default(const Expression *expr, ExecutionState *state, int default_value, int *out_value) {
@@ -799,6 +840,22 @@ bool painter_eval_positive_vector3(
     x_expr = expr->coordinate.x;
     y_expr = expr->coordinate.y;
     z_expr = expr->coordinate.z;
+  } else if (expr->type == EXPR_ARRAY) {
+    // Handle array as coordinate
+    size_t count = expr->array.elements.count;
+    if (count >= 1) {
+      x_expr = expr->array.elements.items[0];
+    }
+    if (count >= 2) {
+      if (count == 2) {
+        // 2 elements: [x, z], y defaults
+        z_expr = expr->array.elements.items[1];
+      } else {
+        // 3+ elements: [x, y, z]
+        y_expr = expr->array.elements.items[1];
+        z_expr = expr->array.elements.items[2];
+      }
+    }
   }
 
   if (!x_expr) {

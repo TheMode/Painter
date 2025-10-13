@@ -1,0 +1,30 @@
+// Test array assignment functionality
+
+// Simple numeric arrays
+simple = [1, 2, 3]
+coords = [10, 20, 30]
+values = [1.5, 2.5, 3.5]
+
+// Empty array
+empty = []
+
+// Arrays with expressions
+x = 5
+computed = [x, x + 1, x * 2]
+math = [1 + 2, 3 * 4, 5 - 1]
+
+// Nested arrays (multi-dimensional)
+matrix = [[1, 2], [3, 4]]
+points = [[0, 0, 0], [1, 1, 1], [2, 2, 2]]
+nested = [[1], [2], [3]]
+
+// Deep nesting
+deep = [[[1, 2]], [[3, 4]]]
+
+// Arrays used in macro arguments (coordinate-like)
+#cuboid .from=[0, 0, 0] .to=[3, 2, 4] .block=oak_planks .hollow
+#line .from=[0, 0, 0] .to=[5, 0, 0] .block=stone
+
+// Block placement still uses coordinate syntax
+[0, 0, 0] grass_block
+[1, 1, 1] stone

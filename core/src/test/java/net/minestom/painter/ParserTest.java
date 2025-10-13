@@ -188,7 +188,31 @@ final class ParserTest {
                 Arguments.of("""
                         x = 10
                         [x..x*2, 0, 0] green_concrete
-                        """)
+                        """),
+                // Array assignment tests
+                Arguments.of("arr = [1, 2, 3]"),
+                Arguments.of("""
+                        x = [0, 1, 2]
+                        y = [3, 4, 5]
+                        """),
+                Arguments.of("coords = [10, 20, 30]"),
+                Arguments.of("values = [1.5, 2.5, 3.5]"),
+                Arguments.of("empty = []"),
+                Arguments.of("""
+                        a = [1 + 2, 3 * 4, 5 - 1]
+                        """),
+                Arguments.of("""
+                        x = 5
+                        arr = [x, x + 1, x * 2]
+                        """),
+                // Nested array tests
+                Arguments.of("matrix = [[1, 2], [3, 4]]"),
+                Arguments.of("coords = [[0, 0, 0], [1, 1, 1], [2, 2, 2]]"),
+                Arguments.of("""
+                        points = [[1, 2, 3], [4, 5, 6]]
+                        """),
+                Arguments.of("nested = [[1], [2], [3]]"),
+                Arguments.of("deep = [[[1, 2]], [[3, 4]]]")
         );
     }
 

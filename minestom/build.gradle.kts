@@ -24,6 +24,8 @@ dependencies {
 tasks.withType<Test> {
     jvmArgs("--enable-preview", "--enable-native-access=ALL-UNNAMED")
     useJUnitPlatform()
+    // Demo files are in test sources but aren't JUnit tests
+    failOnNoDiscoveredTests.set(false)
 }
 
 tasks.withType<JavaExec> {
