@@ -1742,6 +1742,12 @@ void context_set(VariableContext *ctx, const char *name, double value) {
   // Check if variable already exists
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
+      // Free old data if needed
+      if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
+        palette_definition_destroy(ctx->variables[i].v.palette);
+      } else if (ctx->variables[i].type == VAR_ARRAY && ctx->variables[i].v.array.items) {
+        free(ctx->variables[i].v.array.items);
+      }
       ctx->variables[i].type = VAR_NUMBER;
       ctx->variables[i].v.value = value;
       return;
