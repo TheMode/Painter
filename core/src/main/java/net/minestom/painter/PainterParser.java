@@ -14,20 +14,16 @@ import java.nio.file.Path;
 public final class PainterParser {
 
     static {
-        // Load the native library
         String libName = switch (System.getProperty("os.name").toLowerCase()) {
             case String os when os.contains("mac") -> "libpainter.dylib";
             case String os when os.contains("windows") -> "painter.dll";
             default -> "libpainter.so";
         };
-
         try {
-            // Try to load from build directory first (for development)
             Path libPath = Path.of("core/build/native/" + libName);
             if (libPath.toFile().exists()) {
                 System.load(libPath.toAbsolutePath().toString());
             } else {
-                // Fall back to system library path
                 System.loadLibrary("painter");
             }
         } catch (UnsatisfiedLinkError e) {
@@ -36,16 +32,8 @@ public final class PainterParser {
         }
     }
 
-    /**
-     * Parse a .paint file and return the program structure.
-     *
-     * @param paintFilePath Path to the .paint file
-     * @return Memory segment containing the parsed Program structure
-     * @throws Exception if parsing fails
-     */
     public static MemorySegment parseFile(Path paintFilePath) throws Exception {
-        String content = Files.readString(paintFilePath);
-        return parseString(content);
+        return parseString(Files.readString(paintFilePath));
     }
 
     /**
@@ -56,26 +44,13 @@ public final class PainterParser {
      */
     public static MemorySegment parseString(String paintCode) {
         try (Arena arena = Arena.ofConfined()) {
-            // Allocate memory for the input string
-            MemorySegment inputSegment = arena.allocateFrom(paintCode);
-
-            // Allocate parser structure
             MemorySegment parser = arena.allocate(Parser.layout());
-
-            // Initialize the parser
-            PainterNative.parser_init(parser, inputSegment);
-
-            // Parse the program
+            PainterNative.parser_init(parser, arena.allocateFrom(paintCode));
             MemorySegment program = PainterNative.parse_program(parser);
-
-            // Check for errors
-            boolean hasError = Parser.has_error(parser);
-            if (hasError) {
-                MemorySegment errorMsg = Parser.error_message(parser);
-                String error = errorMsg.getString(0);
+            if (Parser.has_error(parser)) {
+                String error = Parser.error_message(parser).getString(0);
                 throw new RuntimeException(error);
             }
-
             return program;
         }
     }
@@ -111,40 +86,33 @@ public final class PainterParser {
      * @return SectionData containing palette and block data
      */
     public static SectionData generateSection(MemorySegment program, int sectionX, int sectionY, int sectionZ) {
-        MemorySegment sectionSegment = PainterNative.generate_section(program, sectionX, sectionY, sectionZ);
-
-        if (sectionSegment.address() == 0) {
+        MemorySegment section = PainterNative.generate_section(program, sectionX, sectionY, sectionZ);
+        if (section.address() == 0) {
             throw new RuntimeException("Failed to generate section");
         }
-
         try {
-            // Extract section data
-            int paletteSize = Section.palette_size(sectionSegment);
-            int bitsPerEntry = Section.bits_per_entry(sectionSegment);
-            int dataSize = Section.data_size(sectionSegment);
+            int paletteSize = Section.palette_size(section);
+            MemorySegment palettePtr = Section.palette(section);
+            MemorySegment lens = Section.palette_lengths(section);
 
-            // Read palette
             String[] palette = new String[paletteSize];
-            MemorySegment palettePtr = Section.palette(sectionSegment);
-
             for (int i = 0; i < paletteSize; i++) {
-                MemorySegment stringPtr = palettePtr.getAtIndex(ValueLayout.ADDRESS, i);
-                palette[i] = stringPtr.reinterpret(Long.MAX_VALUE).getString(0);
+                int len = lens.getAtIndex(ValueLayout.JAVA_INT, i);
+                palette[i] = palettePtr.getAtIndex(ValueLayout.ADDRESS, i).reinterpret(len + 1).getString(0);
             }
 
-            // Read data array
+            int dataSize = Section.data_size(section);
             long[] data = new long[dataSize];
             if (dataSize > 0) {
-                MemorySegment dataPtr = Section.data(sectionSegment);
+                MemorySegment dataPtr = Section.data(section);
                 for (int i = 0; i < dataSize; i++) {
                     data[i] = dataPtr.getAtIndex(ValueLayout.JAVA_LONG, i);
                 }
             }
 
-            return new SectionData(palette, bitsPerEntry, data);
+            return new SectionData(palette, Section.bits_per_entry(section), data);
         } finally {
-            // Free the section
-            PainterNative.section_free(sectionSegment);
+            PainterNative.section_free(section);
         }
     }
 

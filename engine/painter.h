@@ -248,11 +248,12 @@ typedef struct {
 
 // Section structure (16x16x16 Minecraft section)
 typedef struct {
-  char **palette;     // Array of block strings (e.g., "air", "oak_planks[facing=east]")
-  int palette_size;   // Number of unique blocks in the palette
-  int bits_per_entry; // Bits needed to represent each block index
-  uint64_t *data;     // Array of 64-bit integers holding block indices
-  int data_size;      // Number of uint64_t elements in data array
+  char **palette;        // Array of block strings (e.g., "air", "oak_planks[facing=east]")
+  int palette_size;      // Number of unique blocks in the palette
+  int *palette_lengths;  // Length of each palette string (without null terminator)
+  int bits_per_entry;    // Bits needed to represent each block index
+  uint64_t *data;        // Array of 64-bit integers holding block indices
+  int data_size;         // Number of uint64_t elements in data array
 } Section;
 
 // Array value storage

@@ -25,35 +25,19 @@ static void run_instruction_list(const InstructionList *list, ExecutionState *st
 static void
 process_program_at_origin(Program *program, ExecutionState *state, int origin_x, int origin_y, int origin_z, bool occurrences_only);
 
-// Calculate bits needed to represent palette indices
 static int calculate_bits_per_entry(int palette_size) {
-  static int const MIN_BITS = 4;
-  if (palette_size <= 1) return MIN_BITS;
   unsigned x = (unsigned)(palette_size - 1);
-
 #if defined(__GNUC__) || defined(__clang__)
   int bits = sizeof(unsigned) * CHAR_BIT - __builtin_clz(x);
 #else
   int bits = 1;
-  if (x >= 1u << 16) {
-    bits += 16;
-    x >>= 16;
-  }
-  if (x >= 1u << 8) {
-    bits += 8;
-    x >>= 8;
-  }
-  if (x >= 1u << 4) {
-    bits += 4;
-    x >>= 4;
-  }
-  if (x >= 1u << 2) {
-    bits += 2;
-    x >>= 2;
-  }
-  if (x >= 1u << 1) bits++;
+  if (x >= 1u << 16) { bits += 16; x >>= 16; }
+  if (x >= 1u << 8)  { bits += 8;  x >>= 8;  }
+  if (x >= 1u << 4)  { bits += 4;  x >>= 4;  }
+  if (x >= 1u << 2)  { bits += 2;  x >>= 2;  }
+  if (x >= 1u << 1)   bits++;
 #endif
-  return bits < MIN_BITS ? MIN_BITS : bits;
+  return bits < 4 ? 4 : bits;
 }
 
 // Evaluate block position (inlined for performance)
@@ -650,45 +634,36 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
 
   // Pack block data
   section->bits_per_entry = calculate_bits_per_entry(section->palette_size);
+  const int bits_per_entry = section->bits_per_entry;
+  const int blocks_per_long = bits_per_entry >= 64 ? 1 : 64 / bits_per_entry;
 
-  if (section->bits_per_entry == 0) {
-    section->data_size = 0;
-    section->data = NULL;
-  } else {
-    const int bits_per_entry = section->bits_per_entry;
-    int blocks_per_long = bits_per_entry >= 64 ? 1 : 64 / bits_per_entry;
-    if (blocks_per_long <= 0) {
-      blocks_per_long = 1;
+  section->data_size = (4096 + blocks_per_long - 1) / blocks_per_long;
+  section->data = section->data_size > 0 ? calloc((size_t)section->data_size, sizeof(uint64_t)) : NULL;
+
+  if (!section->data) {
+    cleanup_execution_state(&state, &occurrence_registry);
+    section_free(section);
+    return NULL;
+  }
+
+  int long_index = 0, offset_in_long = 0, blocks_in_current_long = 0;
+  for (int i = 0; i < 4096; i++) {
+    if (blocks_in_current_long >= blocks_per_long) {
+      long_index++;
+      blocks_in_current_long = 0;
+      offset_in_long = 0;
     }
+    section->data[long_index] |= ((uint64_t)block_indices[i]) << offset_in_long;
+    blocks_in_current_long++;
+    offset_in_long += bits_per_entry;
+    if (offset_in_long >= 64) offset_in_long = 0;
+  }
 
-    section->data_size = (4096 + blocks_per_long - 1) / blocks_per_long;
-    section->data = section->data_size > 0 ? calloc((size_t)section->data_size, sizeof(uint64_t)) : NULL;
-
-    if (!section->data) {
-      cleanup_execution_state(&state, &occurrence_registry);
-      section_free(section);
-      return NULL;
-    }
-
-    // Pack palette indices while keeping each value within a single 64-bit word.
-    int long_index = 0;
-    int offset_in_long = 0;
-    int blocks_in_current_long = 0;
-
-    for (int i = 0; i < 4096; i++) {
-      if (blocks_in_current_long >= blocks_per_long) {
-        long_index++;
-        blocks_in_current_long = 0;
-        offset_in_long = 0;
-      }
-
-      section->data[long_index] |= ((uint64_t)block_indices[i]) << offset_in_long;
-
-      blocks_in_current_long++;
-      offset_in_long += bits_per_entry;
-      if (offset_in_long >= 64) {
-        offset_in_long = 0;
-      }
+  // Build palette_lengths for bounded Java-side string reads
+  section->palette_lengths = malloc(sizeof(int) * section->palette_size);
+  if (section->palette_lengths) {
+    for (int i = 0; i < section->palette_size; i++) {
+      section->palette_lengths[i] = (int)strlen(section->palette[i]);
     }
   }
 
@@ -705,6 +680,7 @@ void section_free(Section *section) {
     free(section->palette[i]);
   }
   free(section->palette);
+  free(section->palette_lengths);
 
   // Free data array
   free(section->data);

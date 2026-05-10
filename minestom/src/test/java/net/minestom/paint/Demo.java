@@ -103,9 +103,7 @@ public final class Demo {
         final int chunkCount = ChunkRange.chunksCount(ServerFlag.CHUNK_VIEW_DISTANCE);
         LOGGER.info("Pre-loading {} chunks around spawn", chunkCount);
         List<CompletableFuture<Chunk>> futures = new ArrayList<>();
-        ChunkRange.chunksInRange(SPAWN_POS, ServerFlag.CHUNK_VIEW_DISTANCE, (chunkX, chunkZ) -> {
-            futures.add(instance.loadChunk(chunkX, chunkZ));
-        });
+        ChunkRange.chunksInRange(SPAWN_POS, ServerFlag.CHUNK_VIEW_DISTANCE, (chunkX, chunkZ) -> futures.add(instance.loadChunk(chunkX, chunkZ)));
         long startNanos = System.nanoTime();
 
         try (ProgressBar pb = new ProgressBarBuilder()
