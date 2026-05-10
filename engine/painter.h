@@ -34,6 +34,7 @@ typedef struct MacroRegistry MacroRegistry;
 typedef struct OccurrenceRegistry OccurrenceRegistry;
 typedef struct OccurrenceTypeRegistry OccurrenceTypeRegistry;
 typedef struct VariableContext VariableContext;
+typedef struct PaletteRegistry PaletteRegistry;
 
 // Generic pointer-backed containers used throughout the parser/executor
 typedef struct {
@@ -65,6 +66,15 @@ typedef struct {
   size_t count;
   size_t capacity;
 } NamedArgumentList;
+
+// Palette registry: owns all block strings for a program (ID -> string mapping)
+// Thread-safe: lock-free reads, mutex-protected rare writes
+struct PaletteRegistry {
+  char **strings;
+  int count;
+  int capacity;
+  void *mutex; // pthread_mutex_t* (opaque for Java bindings)
+};
 
 // Expression types
 typedef enum {
@@ -244,16 +254,16 @@ typedef struct {
   Instruction **instructions;
   int instruction_count;
   int instruction_capacity;
+  PaletteRegistry *palette_registry;
 } Program;
 
 // Section structure (16x16x16 Minecraft section)
 typedef struct {
-  char **palette;        // Array of block strings (e.g., "air", "oak_planks[facing=east]")
-  int palette_size;      // Number of unique blocks in the palette
-  int *palette_lengths;  // Length of each palette string (without null terminator)
-  int bits_per_entry;    // Bits needed to represent each block index
-  uint64_t *data;        // Array of 64-bit integers holding block indices
-  int data_size;         // Number of uint64_t elements in data array
+  int bits_per_entry;
+  uint64_t *data;
+  int data_size;
+  int *used_palette_ids;
+  int used_palette_count;
 } Section;
 
 // Array value storage
@@ -338,9 +348,7 @@ struct ExecutionState {
   int current_origin_y;
   int current_origin_z;
   int *block_indices;
-  char ***palette;
-  int *palette_size;
-  int *palette_capacity;
+  PaletteRegistry *palette_registry;
 };
 
 // Axis-aligned bounding box helper for world coordinates
@@ -417,11 +425,15 @@ PAINTER_API PaletteDefinition *context_get_palette(VariableContext *ctx, const c
 PAINTER_API void context_set_array(VariableContext *ctx, const char *name, const double *items, size_t count);
 PAINTER_API ArrayValue *context_get_array(VariableContext *ctx, const char *name);
 
+// Palette registry API
+PAINTER_API PaletteRegistry *painter_palette_registry_create(void);
+PAINTER_API int painter_palette_registry_get_or_add(PaletteRegistry *registry, const char *block_string);
+PAINTER_API const char *painter_palette_registry_get(const PaletteRegistry *registry, int id);
+PAINTER_API void painter_palette_registry_free(PaletteRegistry *registry);
+
 // Helper function to get named argument by name
 PAINTER_API Expression *named_arg_get(const NamedArgumentList *args, const char *name);
 
 // Bounding box helpers for InstructionList
-PAINTER_API void instruction_list_init_bounds(InstructionList *list);
 PAINTER_API void instruction_list_expand_bounds(InstructionList *list, int x, int y, int z);
 PAINTER_API void instruction_list_merge_bounds(InstructionList *dest, const InstructionList *src);
-PAINTER_API bool instruction_list_intersects_section(const InstructionList *list, int section_x, int section_y, int section_z);

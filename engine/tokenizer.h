@@ -65,5 +65,3 @@ Token tokenizer_peek_token(Tokenizer *tokenizer);
 Token tokenizer_peek_next_token(Tokenizer *tokenizer);
 bool tokenizer_consume(Tokenizer *tokenizer, TokenType expected_type);
 bool tokenizer_consume_value(Tokenizer *tokenizer, TokenType expected_type, const char *expected_value);
-void tokenizer_skip_until(Tokenizer *tokenizer, const TokenType *stop_tokens, int num_stop_tokens);
-const char *token_type_to_string(TokenType type);

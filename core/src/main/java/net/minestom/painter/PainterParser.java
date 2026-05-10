@@ -32,16 +32,13 @@ public final class PainterParser {
         }
     }
 
+    private volatile String[] paletteCache = new String[64];
+    private final Object cacheLock = new Object();
+
     public static MemorySegment parseFile(Path paintFilePath) throws Exception {
         return parseString(Files.readString(paintFilePath));
     }
 
-    /**
-     * Parse a .paint string and return the program structure.
-     *
-     * @param paintCode The .paint code to parse
-     * @return Memory segment containing the parsed Program structure
-     */
     public static MemorySegment parseString(String paintCode) {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment parser = arena.allocate(Parser.layout());
@@ -55,60 +52,38 @@ public final class PainterParser {
         }
     }
 
-    /**
-     * Free a program structure.
-     *
-     * @param program The program memory segment to free
-     */
     public static void freeProgram(MemorySegment program) {
         if (program != null && program.address() != 0) {
             PainterNative.program_free(program);
         }
     }
 
-    /**
-     * Get the number of instructions in a program.
-     *
-     * @param program The program memory segment
-     * @return Number of instructions
-     */
     public static int getInstructionCount(MemorySegment program) {
         return Program.instruction_count(program);
     }
 
-    /**
-     * Generate a Minecraft section from a parsed program.
-     *
-     * @param program  The program memory segment
-     * @param sectionX Section X coordinate
-     * @param sectionY Section Y coordinate
-     * @param sectionZ Section Z coordinate
-     * @return SectionData containing palette and block data
-     */
-    public static SectionData generateSection(MemorySegment program, int sectionX, int sectionY, int sectionZ) {
+    public SectionData generateSection(MemorySegment program, int sectionX, int sectionY, int sectionZ) {
         MemorySegment section = PainterNative.generate_section(program, sectionX, sectionY, sectionZ);
-        if (section.address() == 0) {
-            throw new RuntimeException("Failed to generate section");
-        }
+        if (section.address() == 0) throw new RuntimeException("Failed to generate section");
         try {
-            int paletteSize = Section.palette_size(section);
-            MemorySegment palettePtr = Section.palette(section);
-            MemorySegment lens = Section.palette_lengths(section);
+            final int usedCount = Section.used_palette_count(section);
+            final MemorySegment idsSeg = Section.used_palette_ids(section);
+            MemorySegment registry = Program.palette_registry(program);
 
-            String[] palette = new String[paletteSize];
-            for (int i = 0; i < paletteSize; i++) {
-                int len = lens.getAtIndex(ValueLayout.JAVA_INT, i);
-                palette[i] = palettePtr.getAtIndex(ValueLayout.ADDRESS, i).reinterpret(len + 1).getString(0);
-            }
-
-            int dataSize = Section.data_size(section);
-            long[] data = new long[dataSize];
-            if (dataSize > 0) {
-                MemorySegment dataPtr = Section.data(section);
-                for (int i = 0; i < dataSize; i++) {
-                    data[i] = dataPtr.getAtIndex(ValueLayout.JAVA_LONG, i);
+            String[] palette = new String[usedCount];
+            String[] cache = paletteCache;
+            for (int i = 0; i < usedCount; i++) {
+                int id = idsSeg.get(ValueLayout.JAVA_INT, i * 4L);
+                String s = (id < cache.length) ? cache[id] : null;
+                if (s == null) {
+                    s = resolvePaletteString(registry, id);
                 }
+                palette[i] = s;
             }
+
+            final int dataSize = Section.data_size(section);
+            long[] data = new long[dataSize];
+            if (dataSize > 0) MemorySegment.copy(Section.data(section), ValueLayout.JAVA_LONG, 0, data, 0, dataSize);
 
             return new SectionData(palette, Section.bits_per_entry(section), data);
         } finally {
@@ -116,15 +91,35 @@ public final class PainterParser {
         }
     }
 
-    /**
-     * Data class representing a generated Minecraft section.
-     */
+    private String resolvePaletteString(MemorySegment registry, int id) {
+        String[] cache = paletteCache;
+        if (id < cache.length) {
+            String s = cache[id];
+            if (s != null) return s;
+        }
+
+        final MemorySegment strPtr = PainterNative.painter_palette_registry_get(registry, id);
+        final String s = strPtr.getString(0);
+
+        synchronized (cacheLock) {
+            cache = paletteCache;
+            if (id < cache.length) {
+                if (cache[id] != null) return cache[id];
+                cache[id] = s;
+                return s;
+            }
+            final int newLen = Math.max(id + 1, cache.length * 2);
+            String[] resized = new String[newLen];
+            System.arraycopy(cache, 0, resized, 0, cache.length);
+            resized[id] = s;
+            paletteCache = resized;
+        }
+        return s;
+    }
+
     public record SectionData(String[] palette, int bitsPerEntry, long[] data) {
     }
 
-    /**
-     * Example usage
-     */
     static void main(String[] args) {
         String[] tests = {
                 "[0, 0] air",
@@ -140,8 +135,8 @@ public final class PainterParser {
                 int count = getInstructionCount(program);
                 System.out.println("✓ Parsed " + count + " instructions successfully!");
 
-                // Generate section and check the block was placed
-                SectionData section = generateSection(program, 0, 0, 0);
+                PainterParser parser = new PainterParser();
+                SectionData section = parser.generateSection(program, 0, 0, 0);
                 System.out.println("  Palette size: " + section.palette.length);
                 System.out.println("  Palette: " + String.join(", ", section.palette()));
 

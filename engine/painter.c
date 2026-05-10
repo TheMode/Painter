@@ -8,6 +8,10 @@
 #include "painter_eval.h"
 #include <ctype.h>
 #include <limits.h>
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+#include <stddef.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -249,6 +253,7 @@ static Occurrence parse_occurrence_reference(Parser *parser, const char *name);
 static PaletteDefinition parse_palette_definition(Parser *parser);
 static MacroCall parse_macro_call(Parser *parser);
 static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range);
+static void program_build_palette_registry(Program *program);
 
 // Parser initialization
 void parser_init(Parser *parser, const char *input) {
@@ -1443,6 +1448,7 @@ Program *parse_program(Parser *parser) {
   program->instructions = NULL;
   program->instruction_count = 0;
   program->instruction_capacity = 0;
+  program->palette_registry = NULL;
 
   while (peek_type() != TOKEN_EOF && !parser->has_error) {
     Instruction *instr = parse_instruction(parser);
@@ -1458,6 +1464,13 @@ Program *parse_program(Parser *parser) {
 
   if (parser->has_error) {
     fprintf(stderr, "%s\n", parser->error_message);
+  }
+
+  if (!parser->has_error) {
+    program->palette_registry = painter_palette_registry_create();
+    if (program->palette_registry) {
+      program_build_palette_registry(program);
+    }
   }
 
   return program;
@@ -1571,6 +1584,7 @@ void program_free(Program *program) {
     instruction_free(program->instructions[i]);
   }
   free(program->instructions);
+  painter_palette_registry_free(program->palette_registry);
   free(program);
 }
 
@@ -1820,10 +1834,8 @@ void context_free(VariableContext *ctx) {
 }
 
 void context_set(VariableContext *ctx, const char *name, double value) {
-  // Check if variable already exists
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
-      // Free old data if needed
       if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
         palette_definition_destroy(ctx->variables[i].v.palette);
       } else if (ctx->variables[i].type == VAR_ARRAY && ctx->variables[i].v.array.items) {
@@ -1835,7 +1847,6 @@ void context_set(VariableContext *ctx, const char *name, double value) {
     }
   }
 
-  // Add new variable
   if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity, ctx->variable_count, sizeof(*ctx->variables))) {
     return;
   }
@@ -1852,7 +1863,6 @@ void context_set_palette(VariableContext *ctx, const char *name, const PaletteDe
   PaletteDefinition *copy = palette_definition_clone(definition);
   if (!copy) return;
 
-  // Find existing
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
       if (ctx->variables[i].type == VAR_PALETTE) {
@@ -1864,7 +1874,6 @@ void context_set_palette(VariableContext *ctx, const char *name, const PaletteDe
     }
   }
 
-  // Add new variable
   if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity, ctx->variable_count, sizeof(*ctx->variables))) {
     palette_definition_destroy(copy);
     return;
@@ -1889,7 +1898,6 @@ PaletteDefinition *context_get_palette(VariableContext *ctx, const char *name) {
 void context_set_array(VariableContext *ctx, const char *name, const double *items, size_t count) {
   if (!ctx || !name) return;
 
-  // Allocate array storage
   double *copy = NULL;
   if (count > 0 && items) {
     copy = malloc(sizeof(double) * count);
@@ -1897,10 +1905,8 @@ void context_set_array(VariableContext *ctx, const char *name, const double *ite
     memcpy(copy, items, sizeof(double) * count);
   }
 
-  // Find existing variable
   for (size_t i = 0; i < ctx->variable_count; i++) {
     if (strcmp(ctx->variables[i].name, name) == 0) {
-      // Free old data if needed
       if (ctx->variables[i].type == VAR_PALETTE && ctx->variables[i].v.palette) {
         palette_definition_destroy(ctx->variables[i].v.palette);
       } else if (ctx->variables[i].type == VAR_ARRAY && ctx->variables[i].v.array.items) {
@@ -1913,7 +1919,6 @@ void context_set_array(VariableContext *ctx, const char *name, const double *ite
     }
   }
 
-  // Add new variable
   if (!ensure_capacity(NULL, (void **)&ctx->variables, &ctx->variable_capacity, ctx->variable_count, sizeof(*ctx->variables))) {
     free(copy);
     return;
@@ -1943,7 +1948,6 @@ double context_get(VariableContext *ctx, const char *name) {
       if (ctx->variables[i].type == VAR_NUMBER) {
         return ctx->variables[i].v.value;
       } else {
-        // Requested name exists but is not a numeric variable
         return 0.0;
       }
     }
@@ -1961,15 +1965,157 @@ Expression *named_arg_get(const NamedArgumentList *args, const char *name) {
   return NULL;
 }
 
-// Bounding box helpers for InstructionList
-void instruction_list_init_bounds(InstructionList *list) {
-  if (!list) return;
-  list->has_bounds = true;
-  list->min_x = list->max_x = 0;
-  list->min_y = list->max_y = 0;
-  list->min_z = list->max_z = 0;
+// Palette registry implementation (thread-safe: lock-free reads, mutex-protected rare writes)
+PaletteRegistry *painter_palette_registry_create(void) {
+  PaletteRegistry *registry = calloc(1, sizeof(PaletteRegistry));
+  if (!registry) return NULL;
+  registry->capacity = 64;
+  registry->strings = calloc(registry->capacity, sizeof(char *));
+  if (!registry->strings) {
+    free(registry);
+    return NULL;
+  }
+#ifndef _WIN32
+  registry->mutex = malloc(sizeof(pthread_mutex_t));
+  if (registry->mutex) {
+    pthread_mutex_t *mtx = (pthread_mutex_t *)registry->mutex;
+    pthread_mutex_init(mtx, NULL);
+  }
+#endif
+  return registry;
 }
 
+int painter_palette_registry_get_or_add(PaletteRegistry *registry, const char *block_string) {
+  if (!registry || !block_string || !block_string[0]) return -1;
+
+  // Fast path: lock-free read
+  int count = registry->count;
+  for (int i = 0; i < count; i++) {
+    if (strcmp(registry->strings[i], block_string) == 0) {
+      return i;
+    }
+  }
+
+  // Slow path: acquire mutex for write
+#ifndef _WIN32
+  if (!registry->mutex) return -1;
+  pthread_mutex_t *mtx = (pthread_mutex_t *)registry->mutex;
+  pthread_mutex_lock(mtx);
+#endif
+
+  // Double-check after acquiring lock
+  count = registry->count;
+  for (int i = 0; i < count; i++) {
+    if (strcmp(registry->strings[i], block_string) == 0) {
+#ifndef _WIN32
+      pthread_mutex_unlock(mtx);
+#endif
+      return i;
+    }
+  }
+
+  // Grow if needed
+  if (registry->count >= registry->capacity) {
+    int new_capacity = registry->capacity * 2;
+    char **resized = realloc(registry->strings, sizeof(char *) * new_capacity);
+    if (!resized) {
+#ifndef _WIN32
+      pthread_mutex_unlock(mtx);
+#endif
+      return -1;
+    }
+    registry->strings = resized;
+    registry->capacity = new_capacity;
+  }
+
+  size_t len = strlen(block_string);
+  char *copy = malloc(len + 1);
+  if (!copy) {
+#ifndef _WIN32
+    pthread_mutex_unlock(mtx);
+#endif
+    return -1;
+  }
+  memcpy(copy, block_string, len + 1);
+
+  int id = registry->count;
+  registry->strings[id] = copy;
+  registry->count = id + 1;
+
+#ifndef _WIN32
+  pthread_mutex_unlock(mtx);
+#endif
+  return id;
+}
+
+const char *painter_palette_registry_get(const PaletteRegistry *registry, int id) {
+  if (!registry || id < 0 || id >= registry->count) return NULL;
+  return registry->strings[id];
+}
+
+void painter_palette_registry_free(PaletteRegistry *registry) {
+  if (!registry) return;
+  for (int i = 0; i < registry->count; i++) {
+    free(registry->strings[i]);
+  }
+  free(registry->strings);
+#ifndef _WIN32
+  if (registry->mutex) {
+    pthread_mutex_destroy((pthread_mutex_t *)registry->mutex);
+    free(registry->mutex);
+  }
+#endif
+  free(registry);
+}
+
+// Forward declarations for eager palette building
+static void build_palette_from_instruction_list(const InstructionList *list, PaletteRegistry *registry);
+
+static void build_palette_from_instruction(const Instruction *instr, PaletteRegistry *registry) {
+  if (!instr || !registry) return;
+
+  switch (instr->type) {
+  case INSTR_BLOCK_PLACEMENT: {
+    const char *block_id = instr->block_placement.block_identifier;
+    if (block_id[0]) {
+      painter_palette_registry_get_or_add(registry, block_id);
+    }
+    break;
+  }
+  case INSTR_FOR_LOOP:
+    build_palette_from_instruction_list(&instr->for_loop.body, registry);
+    break;
+  case INSTR_IF_STATEMENT:
+    for (size_t i = 0; i < instr->if_statement.branch_count; i++) {
+      build_palette_from_instruction_list(&instr->if_statement.branches[i].body, registry);
+    }
+    break;
+  case INSTR_OCCURRENCE:
+    build_palette_from_instruction_list(&instr->occurrence.body, registry);
+    break;
+  case INSTR_MACRO_CALL:
+  case INSTR_ASSIGNMENT:
+    break;
+  }
+}
+
+static void build_palette_from_instruction_list(const InstructionList *list, PaletteRegistry *registry) {
+  if (!list || !registry) return;
+  for (size_t i = 0; i < list->count; i++) {
+    build_palette_from_instruction(list->items[i], registry);
+  }
+}
+
+void program_build_palette_registry(Program *program) {
+  if (!program || !program->palette_registry) return;
+  // Reserve ID 0 for "air" (always added first during generate_section)
+  painter_palette_registry_get_or_add(program->palette_registry, "air");
+  for (int i = 0; i < program->instruction_count; i++) {
+    build_palette_from_instruction(program->instructions[i], program->palette_registry);
+  }
+}
+
+// Bounding box helpers for InstructionList
 void instruction_list_expand_bounds(InstructionList *list, int x, int y, int z) {
   if (!list) return;
 
@@ -2007,22 +2153,6 @@ void instruction_list_merge_bounds(InstructionList *dest, const InstructionList 
     if (src->min_z < dest->min_z) dest->min_z = src->min_z;
     if (src->max_z > dest->max_z) dest->max_z = src->max_z;
   }
-}
-
-bool instruction_list_intersects_section(const InstructionList *list, int section_x, int section_y, int section_z) {
-  if (!list || !list->has_bounds) return false;
-
-  // Convert section coordinates to world coordinates
-  const int base_x = section_x * 16;
-  const int base_y = section_y * 16;
-  const int base_z = section_z * 16;
-  const int max_x = base_x + 15;
-  const int max_y = base_y + 15;
-  const int max_z = base_z + 15;
-
-  // Check if bounding boxes intersect
-  return !(list->max_x < base_x || list->min_x > max_x || list->max_y < base_y || list->min_y > max_y || list->max_z < base_z ||
-           list->min_z > max_z);
 }
 
 // Helper to estimate bounds from an expression (conservative estimate for non-literals)

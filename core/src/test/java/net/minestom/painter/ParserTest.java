@@ -1801,22 +1801,24 @@ final class ParserTest {
             """)
     @DisplayName("#ramp macro with long gradient and 3D path")
     void testRampLongGradient3D(ProgramContext ctx) {
-        PainterParser.SectionData section = ctx.generateSection(0, 0, 0);
-        assertPaletteContains(section, "oak_planks", "dark_oak_planks", "air");
-        
+        PainterParser.SectionData section0 = ctx.generateSection(0, 0, 0);
+        PainterParser.SectionData section1 = ctx.generateSection(1, 0, 0);
+        assertPaletteContains(section0, "oak_planks", "air");
+        assertPaletteContains(section1, "dark_oak_planks", "air");
+
         // Long gradient ramp
-        assertBlockAt(section, 0, 0, 0, "oak_planks");
-        
-        // Should have variety of blocks
+        assertBlockAt(section0, 0, 0, 0, "oak_planks");
+
+        // Should have variety of blocks across both sections
         int uniqueBlocks = 0;
-        if (paletteIndex(section, "oak_planks") >= 0) uniqueBlocks++;
-        if (paletteIndex(section, "spruce_planks") >= 0) uniqueBlocks++;
-        if (paletteIndex(section, "birch_planks") >= 0) uniqueBlocks++;
-        if (paletteIndex(section, "jungle_planks") >= 0) uniqueBlocks++;
-        if (paletteIndex(section, "acacia_planks") >= 0) uniqueBlocks++;
-        if (paletteIndex(section, "dark_oak_planks") >= 0) uniqueBlocks++;
-        
-        assertTrue(uniqueBlocks >= 3, "Long gradient should use multiple block types");
+        if (paletteIndex(section0, "oak_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section0, "spruce_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section0, "birch_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section0, "jungle_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section0, "acacia_planks") >= 0) uniqueBlocks++;
+        if (paletteIndex(section1, "dark_oak_planks") >= 0) uniqueBlocks++;
+
+        assertTrue(uniqueBlocks >= 5, "Long gradient should use multiple block types across sections");
     }
 
     @PaintTest("""
@@ -1938,5 +1940,26 @@ final class ParserTest {
             String expectedBlock = "b" + i;
             assertBlockAt(section, i, 0, 0, expectedBlock);
         }
+    }
+
+    @PaintTest("[0, 0] stone\n[16, 0] stone\n[1, 0] gold_block")
+    @DisplayName("Palette strings are interned and reused across sections")
+    void paletteStringsAreInternedAcrossSections(ProgramContext ctx) {
+        var s1 = ctx.generateSection(0, 0, 0);
+        var s2 = ctx.generateSection(1, 0, 0);
+
+        // Both sections should share the same String objects for common blocks
+        int stoneIdx1 = paletteIndex(s1, "stone");
+        int stoneIdx2 = paletteIndex(s2, "stone");
+        int airIdx1 = paletteIndex(s1, "air");
+        int airIdx2 = paletteIndex(s2, "air");
+
+        assertTrue(stoneIdx1 >= 0 && stoneIdx2 >= 0, "Both sections should have stone");
+        assertTrue(airIdx1 >= 0 && airIdx2 >= 0, "Both sections should have air");
+
+        assertSame(s1.palette()[stoneIdx1], s2.palette()[stoneIdx2],
+                "stone strings should be the same object across sections");
+        assertSame(s1.palette()[airIdx1], s2.palette()[airIdx2],
+                "air strings should be the same object across sections");
     }
 }

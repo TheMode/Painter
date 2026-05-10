@@ -14,7 +14,8 @@ class FunctionTest {
     private static PainterParser.SectionData execute(String program) {
         MemorySegment programSegment = PainterParser.parseString(program);
         try {
-            return PainterParser.generateSection(programSegment, 0, 0, 0);
+            PainterParser parser = new PainterParser();
+            return parser.generateSection(programSegment, 0, 0, 0);
         } finally {
             PainterParser.freeProgram(programSegment);
         }

@@ -15,6 +15,7 @@ import static net.minestom.server.coordinate.CoordConversion.SECTION_SIZE;
 
 @NotNullByDefault
 public final class PaintGenerator implements Generator {
+    private final PainterParser parser = new PainterParser();
     private final MemorySegment program;
 
     public static PaintGenerator load(String programCode) {
@@ -32,7 +33,7 @@ public final class PaintGenerator implements Generator {
             final int sectionX = section.blockX(), sectionY = section.blockY(), sectionZ = section.blockZ();
 
             // Generate section data from the painter program
-            PainterParser.SectionData sectionData = PainterParser.generateSection(
+            PainterParser.SectionData sectionData = parser.generateSection(
                     program, sectionX, sectionY, sectionZ
             );
 
