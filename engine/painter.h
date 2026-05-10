@@ -334,6 +334,8 @@ struct FunctionRegistry {
   size_t entry_capacity;
 };
 
+#define PAINTER_PALETTE_EXPR_CACHE 24
+
 // Execution state that holds all runtime context for code generation
 struct ExecutionState {
   VariableContext *variables;
@@ -349,6 +351,14 @@ struct ExecutionState {
   int current_origin_z;
   int *block_indices;
   PaletteRegistry *palette_registry;
+  bool use_anchor_xyz;
+  int anchor_x;
+  int anchor_y;
+  int anchor_z;
+  void *noise_state;
+  const Expression *palette_expr_key[PAINTER_PALETTE_EXPR_CACHE];
+  int palette_expr_palette[PAINTER_PALETTE_EXPR_CACHE];
+  int palette_expr_count;
 };
 
 // Axis-aligned bounding box helper for world coordinates
@@ -420,6 +430,7 @@ PAINTER_API void context_init(VariableContext *ctx);
 PAINTER_API void context_free(VariableContext *ctx);
 PAINTER_API void context_set(VariableContext *ctx, const char *name, double value);
 PAINTER_API double context_get(VariableContext *ctx, const char *name);
+PAINTER_API void context_strip_occurrence_axes(VariableContext *ctx);
 PAINTER_API void context_set_palette(VariableContext *ctx, const char *name, const PaletteDefinition *definition);
 PAINTER_API PaletteDefinition *context_get_palette(VariableContext *ctx, const char *name);
 PAINTER_API void context_set_array(VariableContext *ctx, const char *name, const double *items, size_t count);

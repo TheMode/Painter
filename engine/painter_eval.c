@@ -2,6 +2,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 #include "painter_eval.h"
+#include "FastNoiseLite.h"
 #include "builtin_functions.h"
 #include "builtin_macros.h"
 #include "builtin_occurrences.h"
@@ -11,6 +12,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static bool eval_ctx_has_number(const VariableContext *ctx, const char *name) {
+  if (!ctx || !name) return false;
+  for (size_t i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) == 0 && ctx->variables[i].type == VAR_NUMBER) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Forward declarations for internal functions
 static void execute_occurrence_instruction(const Occurrence *occurrence, ExecutionState *state, int origin_x, int origin_y, int origin_z);
@@ -67,7 +78,19 @@ double painter_evaluate_expression(const Expression *expr, ExecutionState *state
 
   switch (expr->type) {
   case EXPR_NUMBER: return expr->number;
-  case EXPR_IDENTIFIER: return context_get(state->variables, expr->identifier);
+  case EXPR_IDENTIFIER:
+    if (state->use_anchor_xyz) {
+      const char *id = expr->identifier;
+      if (id[1] == '\0' && !eval_ctx_has_number(state->variables, id)) {
+        switch (id[0]) {
+        case 'x': return (double)state->anchor_x;
+        case 'y': return (double)state->anchor_y;
+        case 'z': return (double)state->anchor_z;
+        default: break;
+        }
+      }
+    }
+    return context_get(state->variables, expr->identifier);
   case EXPR_BINARY_OP: {
     double left = painter_evaluate_expression(expr->binary.left, state);
     double right = painter_evaluate_expression(expr->binary.right, state);
@@ -233,12 +256,16 @@ static void occurrence_runtime_run_body(void *userdata, const InstructionList *b
   ExecutionState *state = (ExecutionState *)userdata;
   if (!state || !body) return;
 
-  // Inject x, y, z variables so they can be used in expressions like noise2d(x, z, ...)
-  context_set(state->variables, "x", (double)anchor_x);
-  context_set(state->variables, "y", (double)anchor_y);
-  context_set(state->variables, "z", (double)anchor_z);
+  context_strip_occurrence_axes(state->variables);
+
+  state->anchor_x = anchor_x;
+  state->anchor_y = anchor_y;
+  state->anchor_z = anchor_z;
+  state->use_anchor_xyz = true;
 
   run_instruction_list(body, state, anchor_x, anchor_y, anchor_z);
+
+  state->use_anchor_xyz = false;
 }
 
 // Execute occurrence by type
@@ -254,18 +281,11 @@ static void execute_occurrence_by_type(const char *type, const NamedArgumentList
   }
 
   OccurrenceRuntime runtime = {
-      /* The runtime base coordinates should reflect the world-base of the
-     * section/origin the occurrence is being executed for. Many occurrence
-     * generators compute ranges relative to runtime->base and also receive
-     * an origin offset parameter; when processing occurrences coming from
-     * neighboring sections the origin parameters are non-zero, so we include
-     * origin_* to state->base_*. This ensures occurrences run with the
-     * correct world coordinates for the given origin. */
       .base_x = state->base_x + origin_x,
       .base_y = state->base_y + origin_y,
       .base_z = state->base_z + origin_z,
       .run_body = occurrence_runtime_run_body,
-      .userdata = state,
+      .userdata = state
   };
 
   generator(state, args, body, origin_x, origin_y, origin_z, &runtime);
@@ -515,7 +535,11 @@ static inline void init_execution_state(ExecutionState *state, Program *program,
   context_init(ctx);
   occurrence_registry_init(occurrence_registry);
 
-  // Setup execution state (using global shared registries + program's palette registry)
+  void *noise = malloc(sizeof(fnl_state));
+  if (noise) {
+    *(fnl_state *)noise = fnlCreateState();
+  }
+
   *state = (ExecutionState){
       .variables = ctx,
       .macros = &g_builtin_registries.macros,
@@ -530,6 +554,12 @@ static inline void init_execution_state(ExecutionState *state, Program *program,
       .current_origin_z = 0,
       .block_indices = block_indices,
       .palette_registry = program->palette_registry,
+      .use_anchor_xyz = false,
+      .anchor_x = 0,
+      .anchor_y = 0,
+      .anchor_z = 0,
+      .noise_state = noise,
+      .palette_expr_count = 0,
   };
 }
 
@@ -537,6 +567,8 @@ static inline void init_execution_state(ExecutionState *state, Program *program,
 static inline void cleanup_execution_state(ExecutionState *state, OccurrenceRegistry *occurrence_registry) {
   occurrence_registry_free(occurrence_registry);
   context_free(state->variables);
+  free(state->noise_state);
+  state->noise_state = NULL;
   // Note: Global registries are NOT freed - they persist for reuse
 }
 
@@ -593,6 +625,12 @@ Section *generate_section(Program *program, int section_x, int section_y, int se
 
   ExecutionState state;
   init_execution_state(&state, program, block_indices, base_x, base_y, base_z, &ctx, &occurrence_registry);
+
+  if (!state.noise_state) {
+    cleanup_execution_state(&state, &occurrence_registry);
+    free(section);
+    return NULL;
+  }
 
   // Initialize air block (id 0)
   if (painter_palette_get_or_add(&state, "air") < 0) {

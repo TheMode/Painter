@@ -11,9 +11,19 @@ static int add_block_to_palette(ExecutionState *state, const Expression *block_e
     return -1;
   }
 
-  char block_string[MAX_TOKEN_VALUE_LENGTH];
-  painter_format_block(block_string, sizeof(block_string), block_expr->identifier, "");
-  return painter_palette_get_or_add(state, block_string);
+  for (int i = 0; i < state->palette_expr_count; i++) {
+    if (state->palette_expr_key[i] == block_expr) {
+      return state->palette_expr_palette[i];
+    }
+  }
+
+  int palette_index = painter_palette_get_or_add(state, block_expr->identifier);
+  if (palette_index >= 0 && state->palette_expr_count < PAINTER_PALETTE_EXPR_CACHE) {
+    state->palette_expr_key[state->palette_expr_count] = block_expr;
+    state->palette_expr_palette[state->palette_expr_count] = palette_index;
+    state->palette_expr_count++;
+  }
+  return palette_index;
 }
 
 static void write_block_if_visible(ExecutionState *state, int world_x, int world_y, int world_z, int palette_index) {

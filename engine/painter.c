@@ -12,10 +12,10 @@
 #include <pthread.h>
 #endif
 #include <stddef.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 static inline void safe_strncpy(char *dst, const char *src, size_t dst_size) {
   if (!dst || dst_size == 0) return;
@@ -31,6 +31,212 @@ static inline void safe_strncpy(char *dst, const char *src, size_t dst_size) {
 
 // Forward declaration for bounds tracking
 static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range);
+
+// Compile-time interval registry (thread-local, active only during parse_program).
+typedef struct {
+  char name[MAX_TOKEN_VALUE_LENGTH];
+  int min_val;
+  int max_val;
+} CompileBoundEntry;
+
+typedef struct {
+  CompileBoundEntry *entries;
+  size_t count;
+  size_t capacity;
+} CompileBoundsTls;
+
+static _Thread_local CompileBoundsTls g_compile_bounds;
+
+static void compile_bounds_clear(void) {
+  free(g_compile_bounds.entries);
+  g_compile_bounds = (CompileBoundsTls){0};
+}
+
+static bool compile_bounds_ensure_capacity(void) {
+  if (g_compile_bounds.count < g_compile_bounds.capacity) {
+    return true;
+  }
+  size_t new_cap = g_compile_bounds.capacity ? g_compile_bounds.capacity * 2 : 16u;
+  CompileBoundEntry *next = realloc(g_compile_bounds.entries, new_cap * sizeof(CompileBoundEntry));
+  if (!next) {
+    return false;
+  }
+  g_compile_bounds.entries = next;
+  g_compile_bounds.capacity = new_cap;
+  return true;
+}
+
+static bool compile_bounds_lookup(const char *name, int *min_v, int *max_v) {
+  if (!name) {
+    return false;
+  }
+  for (size_t i = 0; i < g_compile_bounds.count; i++) {
+    if (strcmp(g_compile_bounds.entries[i].name, name) == 0) {
+      *min_v = g_compile_bounds.entries[i].min_val;
+      *max_v = g_compile_bounds.entries[i].max_val;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void compile_bounds_set(const char *name, int min_v, int max_v) {
+  if (!name || !name[0]) {
+    return;
+  }
+  if (min_v > max_v) {
+    int t = min_v;
+    min_v = max_v;
+    max_v = t;
+  }
+  for (size_t i = 0; i < g_compile_bounds.count; i++) {
+    if (strcmp(g_compile_bounds.entries[i].name, name) == 0) {
+      g_compile_bounds.entries[i].min_val = min_v;
+      g_compile_bounds.entries[i].max_val = max_v;
+      return;
+    }
+  }
+  if (!compile_bounds_ensure_capacity()) {
+    return;
+  }
+  CompileBoundEntry *e = &g_compile_bounds.entries[g_compile_bounds.count++];
+  safe_strncpy(e->name, name, MAX_TOKEN_VALUE_LENGTH);
+  e->min_val = min_v;
+  e->max_val = max_v;
+}
+
+static void interval_round_bounds(double lo, double hi, int *omin, int *omax) {
+  if (lo > hi) {
+    double t = lo;
+    lo = hi;
+    hi = t;
+  }
+  int a = (int)floor(lo - 0.5);
+  int b = (int)ceil(hi + 0.5);
+  *omin = a < b ? a : b;
+  *omax = a > b ? a : b;
+}
+
+static inline void bounds_unknown(int conservative_range, int *min_val, int *max_val) {
+  *min_val = -conservative_range;
+  *max_val = conservative_range;
+}
+
+static void estimate_expression_bounds(const Expression *expr, int *min_val, int *max_val, int conservative_range) {
+  if (!expr) {
+    *min_val = *max_val = 0;
+    return;
+  }
+
+  switch (expr->type) {
+  case EXPR_NUMBER:
+    *min_val = *max_val = (int)expr->number;
+    break;
+
+  case EXPR_IDENTIFIER:
+    if (!compile_bounds_lookup(expr->identifier, min_val, max_val)) {
+      bounds_unknown(conservative_range, min_val, max_val);
+    }
+    break;
+
+  case EXPR_FUNCTION_CALL: {
+    const char *fn = expr->function_call.name;
+    const ExpressionList *args = &expr->function_call.args;
+    if (strcmp(fn, "noise2d") == 0 || strcmp(fn, "noise3d") == 0) {
+      *min_val = -1;
+      *max_val = 1;
+      break;
+    }
+    if (strcmp(fn, "round") == 0 && args->count >= 1) {
+      int lo = 0, hi = 0;
+      estimate_expression_bounds(args->items[0], &lo, &hi, conservative_range);
+      interval_round_bounds((double)lo, (double)hi, min_val, max_val);
+      break;
+    }
+    if (strcmp(fn, "floor") == 0 && args->count >= 1) {
+      int lo = 0, hi = 0;
+      estimate_expression_bounds(args->items[0], &lo, &hi, conservative_range);
+      int fa = (int)floor((double)lo);
+      int fb = (int)floor((double)hi);
+      *min_val = fa < fb ? fa : fb;
+      *max_val = fa > fb ? fa : fb;
+      break;
+    }
+    if (strcmp(fn, "ceil") == 0 && args->count >= 1) {
+      int lo = 0, hi = 0;
+      estimate_expression_bounds(args->items[0], &lo, &hi, conservative_range);
+      int ca = (int)ceil((double)lo);
+      int cb = (int)ceil((double)hi);
+      *min_val = ca < cb ? ca : cb;
+      *max_val = ca > cb ? ca : cb;
+      break;
+    }
+    if (strcmp(fn, "trunc") == 0 && args->count >= 1) {
+      int lo = 0, hi = 0;
+      estimate_expression_bounds(args->items[0], &lo, &hi, conservative_range);
+      int ta = (int)lo;
+      int tb = (int)hi;
+      *min_val = ta < tb ? ta : tb;
+      *max_val = ta > tb ? ta : tb;
+      break;
+    }
+    bounds_unknown(conservative_range, min_val, max_val);
+    break;
+  }
+
+  case EXPR_BINARY_OP: {
+    int left_min, left_max, right_min, right_max;
+    estimate_expression_bounds(expr->binary.left, &left_min, &left_max, conservative_range);
+    estimate_expression_bounds(expr->binary.right, &right_min, &right_max, conservative_range);
+
+    switch (expr->binary.op) {
+    case OP_ADD:
+      *min_val = left_min + right_min;
+      *max_val = left_max + right_max;
+      break;
+    case OP_SUBTRACT:
+      *min_val = left_min - right_max;
+      *max_val = left_max - right_min;
+      break;
+    case OP_MULTIPLY:
+      *min_val = left_min * right_min;
+      *max_val = left_max * right_max;
+      if (left_min * right_max < *min_val) *min_val = left_min * right_max;
+      if (left_max * right_min < *min_val) *min_val = left_max * right_min;
+      if (left_min * right_max > *max_val) *max_val = left_min * right_max;
+      if (left_max * right_min > *max_val) *max_val = left_max * right_min;
+      break;
+    default:
+      bounds_unknown(conservative_range, min_val, max_val);
+      break;
+    }
+    break;
+  }
+
+  case EXPR_UNARY_OP:
+    estimate_expression_bounds(expr->unary.operand, min_val, max_val, conservative_range);
+    if (expr->unary.op == OP_NEGATE) {
+      int tmp = *min_val;
+      *min_val = -*max_val;
+      *max_val = -tmp;
+    }
+    break;
+
+  default:
+    bounds_unknown(conservative_range, min_val, max_val);
+    break;
+  }
+}
+
+static void register_compile_bounds_for_assignment(const Assignment *assign) {
+  if (!assign || assign->is_palette_definition || !assign->value) {
+    return;
+  }
+  int lo = 0;
+  int hi = 0;
+  estimate_expression_bounds(assign->value, &lo, &hi, 100);
+  compile_bounds_set(assign->name, lo, hi);
+}
 
 // -----------------------------------------------------------------------------
 // Internal utility helpers
@@ -1439,6 +1645,8 @@ static Instruction *parse_instruction(Parser *parser) {
 }
 
 Program *parse_program(Parser *parser) {
+  compile_bounds_clear();
+
   Program *program = malloc(sizeof(Program));
   if (!program) {
     parser_error(parser, "Out of memory");
@@ -1453,6 +1661,9 @@ Program *parse_program(Parser *parser) {
   while (peek_type() != TOKEN_EOF && !parser->has_error) {
     Instruction *instr = parse_instruction(parser);
     if (instr) {
+      if (instr->type == INSTR_ASSIGNMENT && !instr->assignment.is_palette_definition && instr->assignment.value) {
+        register_compile_bounds_for_assignment(&instr->assignment);
+      }
       if (!program_push_instruction(parser, program, instr)) {
         instruction_free(instr);
         break;
@@ -1473,6 +1684,7 @@ Program *parse_program(Parser *parser) {
     }
   }
 
+  compile_bounds_clear();
   return program;
 }
 
@@ -1955,6 +2167,33 @@ double context_get(VariableContext *ctx, const char *name) {
   return 0.0;
 }
 
+static void variable_context_remove_named(VariableContext *ctx, const char *name) {
+  if (!ctx || !name) return;
+  for (size_t i = 0; i < ctx->variable_count; i++) {
+    if (strcmp(ctx->variables[i].name, name) != 0) {
+      continue;
+    }
+    Variable *v = &ctx->variables[i];
+    if (v->type == VAR_PALETTE && v->v.palette) {
+      palette_definition_destroy(v->v.palette);
+    } else if (v->type == VAR_ARRAY && v->v.array.items) {
+      free(v->v.array.items);
+    }
+    size_t tail = ctx->variable_count - i - 1;
+    if (tail > 0) {
+      memmove(v, v + 1, tail * sizeof(Variable));
+    }
+    ctx->variable_count--;
+    return;
+  }
+}
+
+void context_strip_occurrence_axes(VariableContext *ctx) {
+  variable_context_remove_named(ctx, "x");
+  variable_context_remove_named(ctx, "y");
+  variable_context_remove_named(ctx, "z");
+}
+
 Expression *named_arg_get(const NamedArgumentList *args, const char *name) {
   if (!args) return NULL;
   for (size_t i = 0; i < args->count; i++) {
@@ -2155,72 +2394,16 @@ void instruction_list_merge_bounds(InstructionList *dest, const InstructionList 
   }
 }
 
-// Helper to estimate bounds from an expression (conservative estimate for non-literals)
-static void estimate_expression_bounds(const Expression *expr, int *min_val, int *max_val, int conservative_range) {
-  if (!expr) {
-    *min_val = *max_val = 0;
-    return;
-  }
-
-  switch (expr->type) {
-  case EXPR_NUMBER: *min_val = *max_val = (int)expr->number; break;
-  case EXPR_IDENTIFIER:
-  case EXPR_FUNCTION_CALL:
-    // For unknowns, use conservative range
-    *min_val = -conservative_range;
-    *max_val = conservative_range;
-    break;
-  case EXPR_BINARY_OP: {
-    int left_min, left_max, right_min, right_max;
-    estimate_expression_bounds(expr->binary.left, &left_min, &left_max, conservative_range);
-    estimate_expression_bounds(expr->binary.right, &right_min, &right_max, conservative_range);
-
-    switch (expr->binary.op) {
-    case OP_ADD:
-      *min_val = left_min + right_min;
-      *max_val = left_max + right_max;
-      break;
-    case OP_SUBTRACT:
-      *min_val = left_min - right_max;
-      *max_val = left_max - right_min;
-      break;
-    case OP_MULTIPLY:
-      // Take the extremes
-      *min_val = left_min * right_min;
-      *max_val = left_max * right_max;
-      if (left_min * right_max < *min_val) *min_val = left_min * right_max;
-      if (left_max * right_min < *min_val) *min_val = left_max * right_min;
-      if (left_min * right_max > *max_val) *max_val = left_min * right_max;
-      if (left_max * right_min > *max_val) *max_val = left_max * right_min;
-      break;
-    default:
-      // For comparisons and other ops, use conservative range
-      *min_val = -conservative_range;
-      *max_val = conservative_range;
-      break;
-    }
-    break;
-  }
-  case EXPR_UNARY_OP:
-    estimate_expression_bounds(expr->unary.operand, min_val, max_val, conservative_range);
-    if (expr->unary.op == OP_NEGATE) {
-      int tmp = *min_val;
-      *min_val = -*max_val;
-      *max_val = -tmp;
-    }
-    break;
-  default:
-    *min_val = -conservative_range;
-    *max_val = conservative_range;
-    break;
-  }
-}
-
 // Update instruction list bounds based on an instruction
 static void update_instruction_bounds(InstructionList *list, const Instruction *instr, int conservative_range) {
   if (!list || !instr) return;
 
   switch (instr->type) {
+  case INSTR_ASSIGNMENT:
+    if (!instr->assignment.is_palette_definition && instr->assignment.value) {
+      register_compile_bounds_for_assignment(&instr->assignment);
+    }
+    break;
   case INSTR_BLOCK_PLACEMENT: {
     const BlockPlacement *placement = &instr->block_placement;
     if (placement->coordinate && placement->coordinate->type == EXPR_ARRAY) {

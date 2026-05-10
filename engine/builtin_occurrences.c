@@ -6,6 +6,17 @@
 #include <math.h>
 #include <stdint.h>
 
+static fnl_state *noise_mutate(ExecutionState *state, int seed, float frequency) {
+  fnl_state *n = (fnl_state *)state->noise_state;
+  if (!n) {
+    return NULL;
+  }
+  n->seed = seed;
+  n->frequency = frequency;
+  n->noise_type = FNL_NOISE_OPENSIMPLEX2;
+  return n;
+}
+
 static int floor_div_int(int numerator, int denominator) {
   const int64_t dividend = numerator;
   const int64_t divisor = denominator;
@@ -150,10 +161,10 @@ static void occurrence_noise2d(ExecutionState *state, const NamedArgumentList *a
   const float threshold_cutoff = (threshold_value * 2.0f) - 1.0f;
   const bool use_spread = spread_expr && spread != 0.0f;
 
-  fnl_state noise = fnlCreateState();
-  noise.seed = seed;
-  noise.frequency = frequency;
-  noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
+  fnl_state *noise = noise_mutate(state, seed, frequency);
+  if (!noise) {
+    return;
+  }
 
   const int SEARCH_MARGIN = 16;
   const int base_x = runtime->base_x;
@@ -169,7 +180,7 @@ static void occurrence_noise2d(ExecutionState *state, const NamedArgumentList *a
 
   for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
     for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
-      const float noise_value = fnlGetNoise2D(&noise, (float)anchor_x, (float)anchor_z);
+      const float noise_value = fnlGetNoise2D(noise, (float)anchor_x, (float)anchor_z);
 
       if (use_threshold && noise_value < threshold_cutoff) {
         continue;
@@ -224,10 +235,10 @@ static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *a
     return;
   }
 
-  fnl_state noise = fnlCreateState();
-  noise.seed = seed;
-  noise.frequency = frequency;
-  noise.noise_type = FNL_NOISE_OPENSIMPLEX2;
+  fnl_state *noise = noise_mutate(state, seed, frequency);
+  if (!noise) {
+    return;
+  }
 
   const int SEARCH_MARGIN = 16;
   const int base_x = runtime->base_x;
@@ -263,7 +274,7 @@ static void occurrence_noise3d(ExecutionState *state, const NamedArgumentList *a
   for (int x = range_min_x, anchor_x = x + origin_x; x <= range_max_x; ++x, ++anchor_x) {
     for (int y = range_min_y, anchor_y = y + origin_y; y <= range_max_y; ++y, ++anchor_y) {
       for (int z = range_min_z, anchor_z = z + origin_z; z <= range_max_z; ++z, ++anchor_z) {
-        const float noise_value = fnlGetNoise3D(&noise, (float)anchor_x, (float)anchor_y, (float)anchor_z);
+        const float noise_value = fnlGetNoise3D(noise, (float)anchor_x, (float)anchor_y, (float)anchor_z);
 
         if (use_threshold && noise_value < threshold_cutoff) {
           continue;
