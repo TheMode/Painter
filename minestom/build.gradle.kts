@@ -11,14 +11,14 @@ repositories {
 
 dependencies {
     implementation(project(":core"))
-    implementation("net.minestom:minestom:2025.10.11-1.21.10")
+    implementation("net.minestom:minestom:2026.04.13-1.21.11")
 
-    testImplementation(platform("org.junit:junit-bom:5.10.0"))
+    testImplementation(platform("org.junit:junit-bom:6.0.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // Demo server dependencies (test-only)
-    testImplementation("ch.qos.logback:logback-classic:1.5.19")
-    testImplementation("me.tongfei:progressbar:0.10.1")
+    testImplementation("ch.qos.logback:logback-classic:1.5.32")
+    testImplementation("me.tongfei:progressbar:0.10.2")
 }
 
 tasks.withType<Test> {
