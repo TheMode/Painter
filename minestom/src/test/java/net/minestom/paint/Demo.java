@@ -4,6 +4,7 @@ import me.tongfei.progressbar.DelegatingProgressBarConsumer;
 import me.tongfei.progressbar.ProgressBar;
 import me.tongfei.progressbar.ProgressBarBuilder;
 import me.tongfei.progressbar.ProgressBarStyle;
+import net.kyori.adventure.nbt.CompoundBinaryTag;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.minestom.server.MinecraftServer;
@@ -15,6 +16,7 @@ import net.minestom.server.entity.GameMode;
 import net.minestom.server.entity.Player;
 import net.minestom.server.event.GlobalEventHandler;
 import net.minestom.server.event.player.AsyncPlayerConfigurationEvent;
+import net.minestom.server.event.player.PlayerCustomClickEvent;
 import net.minestom.server.event.player.PlayerDisconnectEvent;
 import net.minestom.server.event.player.PlayerSpawnEvent;
 import net.minestom.server.event.server.ServerListPingEvent;
@@ -51,6 +53,10 @@ public final class Demo {
     }
 
     static void main() throws IOException {
+        start();
+    }
+
+    private static void start() throws IOException {
         MinecraftServer server = MinecraftServer.init();
         DemoConfig config = loadConfig();
 
@@ -76,7 +82,7 @@ public final class Demo {
     }
 
     private static DemoConfig loadConfig() {
-        Path program = Path.of(System.getProperty("painter.program", "worlds/plain_forest.paint"));
+        Path program = Path.of(System.getProperty("painter.program", "worlds/one_block.paint"));
         boolean fileWatcher = Boolean.parseBoolean(System.getProperty("painter.enableFileWatcher", "true"));
         boolean loadCommands = Boolean.parseBoolean(System.getProperty("painter.enableLoadCommands", "true"));
         String bindAddress = System.getProperty("painter.bindAddress", "0.0.0.0");
@@ -178,7 +184,7 @@ public final class Demo {
                 new PainterCommand(instance, config.paintFile(), experience),
                 new TeleportCommand()
         );
-        LOGGER.info("Commands registered: /painter reload, /painter load <url>");
+        LOGGER.info("Commands registered: /painter reload, /painter load <url>, /painter dialog");
     }
 
     private static void registerEventHandlers(InstanceContainer instance, DemoConfig config, PainterExperience experience) {
@@ -205,6 +211,26 @@ public final class Demo {
             }
         });
         events.addListener(PlayerDisconnectEvent.class, event -> experience.handleDisconnect(event.getPlayer()));
+        events.addListener(PlayerCustomClickEvent.class, e -> {
+            if (!e.getKey().equals(PainterCommand.DIALOG_RUN_KEY)) return;
+            Player p = e.getPlayer();
+            if (!(e.getPayload() instanceof CompoundBinaryTag nbt)) {
+                p.sendMessage(text("✗ Invalid dialog response.", NamedTextColor.RED));
+                return;
+            }
+            String code = nbt.getString(PainterCommand.DIALOG_INPUT_KEY);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    experience.notifyReloadStarted("dialog");
+                    GeneratorReloader.reload(instance, code, "dialog");
+                    experience.notifyReloadSuccess("dialog");
+                } catch (Exception ex) {
+                    LOGGER.error("Dialog reload failed", ex);
+                    experience.notifyReloadFailure("dialog", ex.getMessage());
+                    p.sendMessage(text("✗ " + ex.getMessage(), NamedTextColor.RED));
+                }
+            });
+        });
     }
 
     private static void registerShutdownHooks(PaintFileWatcher watcher, PainterExperience experience) {

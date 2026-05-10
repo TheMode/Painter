@@ -40,13 +40,13 @@ final class PainterExperience implements AutoCloseable {
                 text("Explore the generated world and tweak the paint program live.", PainterBranding.NEUTRAL)));
         if (commandsEnabled) {
             player.sendMessage(PainterBranding.prefixed(
-                    text("Try ", PainterBranding.NEUTRAL)
+                    text("Commands: ", PainterBranding.NEUTRAL)
                             .append(text("/painter reload", PainterBranding.SUCCESS))
-                            .append(text(" after editing " + paintFile.getFileName(), PainterBranding.NEUTRAL))));
-            player.sendMessage(PainterBranding.prefixed(
-                    text("Use ", PainterBranding.NEUTRAL)
+                            .append(text(", ", PainterBranding.NEUTRAL))
                             .append(text("/painter load <url>", PainterBranding.SUCCESS))
-                            .append(text(" to showcase your own scripts.", PainterBranding.NEUTRAL))));
+                            .append(text(", ", PainterBranding.NEUTRAL))
+                            .append(text("/painter dialog", PainterBranding.SUCCESS))
+                            .append(text(" — edit file: " + paintFile.getFileName(), PainterBranding.NEUTRAL))));
         }
         if (liveReloadEnabled) {
             player.sendMessage(PainterBranding.prefixed(
@@ -150,7 +150,9 @@ final class PainterExperience implements AutoCloseable {
             builder.append(Component.newline())
                     .append(text("/painter reload", PainterBranding.SUCCESS))
                     .append(text(" • ", PainterBranding.NEUTRAL))
-                    .append(text("/painter load <url>", PainterBranding.SUCCESS));
+                    .append(text("/painter load <url>", PainterBranding.SUCCESS))
+                    .append(text(" • ", PainterBranding.NEUTRAL))
+                    .append(text("/painter dialog", PainterBranding.SUCCESS));
         }
         return builder.build();
     }

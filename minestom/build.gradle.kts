@@ -35,7 +35,7 @@ tasks.withType<JavaExec> {
 tasks.register<JavaExec>("runDemo") {
     group = "application"
     description = "Run the Painter demo server"
-    mainClass.set("net.minestom.paint.demo.Demo")
+    mainClass.set("net.minestom.paint.Demo")
     classpath = sourceSets["test"].runtimeClasspath
     standardInput = System.`in`
     

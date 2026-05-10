@@ -10,6 +10,9 @@ import net.minestom.server.coordinate.Pos;
 import net.minestom.server.entity.Player;
 import net.minestom.server.utils.location.RelativeVec;
 
+/**
+ * Demo helper: {@code /tp} teleports to coordinates or to another online player by name.
+ */
 public final class TeleportCommand extends Command {
     public TeleportCommand() {
         super("tp");
