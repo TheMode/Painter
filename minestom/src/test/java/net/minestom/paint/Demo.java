@@ -52,7 +52,7 @@ public final class Demo {
     private Demo() {
     }
 
-    static void main() throws IOException {
+    public static void main(String[] args) throws IOException {
         start();
     }
 
@@ -103,6 +103,7 @@ public final class Demo {
         String program = Files.readString(paintFile);
         PaintGenerator generator = PaintGenerator.load(program);
         instance.setGenerator(generator);
+        ActivePaintSource.set(program);
         experience.initialize();
         experience.notifyReloadSuccess("initial program");
 

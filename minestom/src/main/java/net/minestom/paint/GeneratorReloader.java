@@ -22,8 +22,9 @@ public final class GeneratorReloader {
     }
 
     /**
-     * Reload the generator with new code and regenerate all currently loaded chunks.
-     * Players in the instance will be temporarily moved to a waiting instance during the reload.
+ * Reload the generator with new code and regenerate all currently loaded chunks.
+ * Players in the instance will be temporarily moved to a waiting instance during the reload.
+ * On success, {@link ActivePaintSource} is updated so {@code /painter dialog} reflects the live program.
      *
      * @param instance    The instance to reload
      * @param programCode The new painter program code
@@ -55,6 +56,7 @@ public final class GeneratorReloader {
 
         // Set the new generator
         instance.setGenerator(newGenerator);
+        ActivePaintSource.set(programCode);
 
         LOGGER.info("Successfully reloaded generator from: {}", source);
     }

@@ -35,10 +35,10 @@ import static net.kyori.adventure.text.format.NamedTextColor.*;
  *   <tr><th>Command</th><th>Description</th></tr>
  *   <tr><td>{@code /painter reload}</td><td>Reload generator from the configured {@code .paint} file on disk.</td></tr>
  *   <tr><td>{@code /painter load <url>}</td><td>Fetch program text from a URL and regenerate the world.</td></tr>
- *   <tr><td>{@code /painter dialog}</td><td>Open the vanilla dialog with a multiline editor (players only).</td></tr>
+ *   <tr><td>{@code /painter dialog}</td><td>Open editor pre-filled with the program currently running on the server.</td></tr>
  * </table>
  *
- * <p>Reload and URL load regenerate all chunks currently loaded in the instance.</p>
+ * <p>Every successful reload updates {@link ActivePaintSource}; the dialog shows that snapshot.</p>
  */
 @NotNullByDefault
 public final class PainterCommand extends Command {
@@ -55,13 +55,11 @@ public final class PainterCommand extends Command {
 
     public PainterCommand(InstanceContainer instance, Path path, PainterExperience experience) {
         super("painter");
-        addSubcommands(new Load(instance, experience), new Reload(instance, path, experience), new Editor(path));
+        addSubcommands(new Load(instance, experience), new Reload(instance, path, experience), new Editor());
     }
 
     /**
-     * Builds the in-game dialog: multiline text keyed {@link #DIALOG_INPUT_KEY}, Run action {@link #DIALOG_RUN_KEY}.
-     *
-     * @param initial text shown in the editor (often the current file contents)
+     * Multiline field {@link #DIALOG_INPUT_KEY}, Run → {@link #DIALOG_RUN_KEY}. Text is the active server program ({@link ActivePaintSource}).
      */
     static Dialog.MultiAction programDialog(String initial) {
         String src = initial == null ? "" : initial;
@@ -71,7 +69,9 @@ public final class PainterCommand extends Command {
                 true,
                 true,
                 DialogAfterAction.CLOSE,
-                List.of(new DialogBody.PlainMessage(text("Edit below, then Run."), DialogBody.PlainMessage.DEFAULT_WIDTH)),
+                List.of(new DialogBody.PlainMessage(
+                        text("Source matches the generator running on this server. Edit below, then Run to replace it."),
+                        DialogBody.PlainMessage.DEFAULT_WIDTH)),
                 List.of(new DialogInput.Text(
                         DIALOG_INPUT_KEY,
                         DialogInput.DEFAULT_WIDTH * 2,
@@ -145,25 +145,17 @@ public final class PainterCommand extends Command {
     }
 
     /**
-     * Opens the vanilla dialog with a multiline Painter program editor, pre-filled from the demo paint file.
-     * <p>
-     * Usage: {@code /painter dialog} — players only. Submitting Run triggers {@link #DIALOG_RUN_KEY} on the server.
+     * {@code /painter dialog} — pre-fills from {@link ActivePaintSource} (same text as the live generator).
      */
     private static final class Editor extends Command {
-        Editor(Path paintFile) {
+        Editor() {
             super("dialog");
             setDefaultExecutor((sender, context) -> {
                 if (!(sender instanceof Player player)) {
                     sender.sendMessage(text("Players only.", RED));
                     return;
                 }
-                String initial;
-                try {
-                    initial = Files.readString(paintFile);
-                } catch (IOException e) {
-                    initial = "";
-                }
-                player.showDialog(programDialog(initial));
+                player.showDialog(programDialog(ActivePaintSource.get()));
             });
         }
     }
